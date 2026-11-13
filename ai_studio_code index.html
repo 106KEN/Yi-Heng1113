@@ -1,0 +1,2239 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>IMF // 2026 全球旅遊情報指揮中心</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700;900&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <style>
+    :root {
+      --bg-void: #020712;
+      --bg-ocean-inner: #07162e;
+      --bg-ocean-outer: #020814;
+      --bg-panel: rgba(6, 17, 36, 0.86);
+      --bg-panel-solid: #071429;
+      --border-hud: rgba(56, 189, 248, 0.28);
+      --border-gold: rgba(251, 191, 36, 0.42);
+      --cyan: #38bdf8;
+      --cyan-bright: #00e5ff;
+      --amber: #f59e0b;
+      --text-main: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+
+      --country-base: #0b1c36;
+      --country-border: #173561;
+      --tier-1: #634b19;
+      --tier-2: #967022;
+      --tier-3: #c9982c;
+      --tier-4: #eab338;
+      --tier-5: #ffd86b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-void);
+      color: var(--text-main);
+      font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .display-font {
+      font-family: 'Orbitron', 'Noto Sans TC', sans-serif;
+    }
+
+    /* Cinematic HUD Overlays */
+    #hud-scanline {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 90;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(56, 189, 248, 0.018) 0px,
+        rgba(56, 189, 248, 0.018) 1px,
+        transparent 1px,
+        transparent 4px
+      );
+    }
+
+    #hud-vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 89;
+      background: radial-gradient(circle at 50% 50%, transparent 58%, rgba(1, 4, 10, 0.72) 100%);
+    }
+
+    /* App Container */
+    #app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: radial-gradient(ellipse at 50% 48%, var(--bg-ocean-inner) 0%, var(--bg-ocean-outer) 78%);
+    }
+
+    /* Top Command Header */
+    #top-hud {
+      position: relative;
+      z-index: 40;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 16px;
+      padding: 10px 18px;
+      background: linear-gradient(180deg, rgba(4, 12, 26, 0.95) 0%, rgba(5, 15, 32, 0.85) 100%);
+      border-bottom: 1px solid var(--border-hud);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 6px 30px rgba(0, 0, 0, 0.55);
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .imf-emblem {
+      position: relative;
+      width: 38px;
+      height: 38px;
+      border: 1.5px solid var(--cyan);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(56, 189, 248, 0.08);
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.25), inset 0 0 10px rgba(56, 189, 248, 0.12);
+      flex-shrink: 0;
+    }
+
+    .imf-emblem::before {
+      content: '';
+      position: absolute;
+      inset: 3px;
+      border: 1px dashed rgba(255, 216, 107, 0.55);
+      border-radius: 3px;
+      animation: slowSpin 18s linear infinite;
+    }
+
+    @keyframes slowSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .brand-titles {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .brand-kicker {
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      color: var(--cyan-bright);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulseDot 1.8s ease-in-out infinite;
+    }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.8); }
+    }
+
+    .brand-main {
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      color: #f8fafc;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .brand-main span {
+      color: var(--tier-5);
+    }
+
+    /* Search & Filter Toolbar */
+    .controls-cluster {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      min-width: 260px;
+    }
+
+    .search-wrapper {
+      position: relative;
+      width: 270px;
+      max-width: 100%;
+    }
+
+    .search-input-box {
+      display: flex;
+      align-items: center;
+      background: rgba(8, 23, 46, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 6px;
+      padding: 0 10px;
+      height: 34px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .search-input-box:focus-within {
+      border-color: var(--cyan-bright);
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.25);
+    }
+
+    .search-icon {
+      color: var(--cyan);
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+
+    #search-input {
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-main);
+      font-size: 13px;
+      width: 100%;
+      font-family: inherit;
+    }
+
+    #search-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    #search-clear {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 4px;
+      display: none;
+    }
+
+    #search-clear:hover {
+      color: #fff;
+    }
+
+    #search-dropdown {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      max-height: 320px;
+      overflow-y: auto;
+      background: rgba(6, 17, 36, 0.97);
+      border: 1px solid var(--cyan);
+      border-radius: 6px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.78);
+      z-index: 100;
+      display: none;
+      backdrop-filter: blur(16px);
+    }
+
+    .search-item {
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(56, 189, 248, 0.1);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+
+    .search-item:last-child {
+      border-bottom: none;
+    }
+
+    .search-item:hover {
+      background: rgba(56, 189, 248, 0.14);
+    }
+
+    .search-item-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+
+    .search-item-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .search-item-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(234, 179, 56, 0.15);
+      border: 1px solid rgba(234, 179, 56, 0.4);
+      color: var(--tier-5);
+      white-space: nowrap;
+    }
+
+    /* Continent Filter Pills */
+    #continent-filters {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding: 2px 0;
+    }
+
+    #continent-filters::-webkit-scrollbar {
+      display: none;
+    }
+
+    .filter-pill {
+      background: rgba(11, 28, 54, 0.78);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      font-family: inherit;
+    }
+
+    .filter-pill:hover {
+      color: #fff;
+      border-color: var(--cyan);
+      background: rgba(56, 189, 248, 0.15);
+    }
+
+    .filter-pill.active {
+      background: rgba(234, 179, 56, 0.18);
+      border-color: var(--tier-5);
+      color: var(--tier-5);
+      box-shadow: 0 0 12px rgba(255, 216, 107, 0.22);
+      font-weight: 700;
+    }
+
+    .mission-clock {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      font-size: 11px;
+      color: var(--cyan);
+      padding-left: 10px;
+      border-left: 1px solid rgba(56, 189, 248, 0.2);
+      white-space: nowrap;
+    }
+
+    .mission-clock span:last-child {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    /* Main Map Stage */
+    #map-stage {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    #world-map {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #world-map:active {
+      cursor: grabbing;
+    }
+
+    /* SVG Map Styles */
+    .ocean-sphere {
+      fill: url(#oceanGrad);
+      stroke: rgba(56, 189, 248, 0.25);
+      stroke-width: 1;
+    }
+
+    .graticule {
+      fill: none;
+      stroke: rgba(56, 189, 248, 0.08);
+      stroke-width: 0.6;
+      stroke-dasharray: 2 3;
+    }
+
+    .country-path {
+      stroke: var(--country-border);
+      stroke-width: 0.55;
+      transition: fill 0.25s ease, opacity 0.3s ease, stroke 0.2s ease;
+    }
+
+    .country-path.featured {
+      cursor: pointer;
+      stroke: rgba(255, 224, 130, 0.35);
+      stroke-width: 0.7;
+    }
+
+    .country-path.featured:hover {
+      stroke: var(--cyan-bright);
+      stroke-width: 1.4;
+      filter: brightness(1.18) drop-shadow(0 0 8px rgba(255, 216, 107, 0.45));
+    }
+
+    .country-path.selected {
+      stroke: var(--cyan-bright) !important;
+      stroke-width: 1.8 !important;
+      filter: brightness(1.22) drop-shadow(0 0 12px rgba(0, 229, 255, 0.55));
+    }
+
+    .country-path.dimmed {
+      opacity: 0.22;
+    }
+
+    /* Interactive Markers */
+    .country-marker {
+      cursor: pointer;
+      transition: opacity 0.25s ease;
+    }
+
+    .country-marker.dimmed {
+      opacity: 0.16;
+      pointer-events: none;
+    }
+
+    .marker-pulse {
+      fill: none;
+      stroke: var(--tier-5);
+      stroke-width: 1.2;
+      opacity: 0;
+      animation: radarPulse 2.8s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    @keyframes radarPulse {
+      0% { transform: scale(0.7); opacity: 0.85; }
+      100% { transform: scale(2.8); opacity: 0; }
+    }
+
+    .marker-core {
+      stroke: #030914;
+      stroke-width: 1;
+      transition: transform 0.2s ease;
+    }
+
+    .country-marker:hover .marker-core {
+      stroke: var(--cyan-bright);
+      stroke-width: 1.5;
+    }
+
+    .attraction-pin {
+      cursor: pointer;
+    }
+
+    .attraction-pin-diamond {
+      fill: var(--cyan-bright);
+      stroke: #030812;
+      stroke-width: 1;
+      filter: drop-shadow(0 0 5px rgba(0, 229, 255, 0.8));
+      transition: transform 0.2s ease;
+    }
+
+    .attraction-pin:hover .attraction-pin-diamond {
+      fill: #fff;
+      transform: scale(1.25);
+    }
+
+    .attraction-pin-label {
+      font-size: 9px;
+      fill: #f8fafc;
+      font-weight: 700;
+      paint-order: stroke;
+      stroke: rgba(2, 7, 18, 0.9);
+      stroke-width: 3px;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+
+    .reticle-ring {
+      fill: none;
+      stroke: var(--cyan-bright);
+      stroke-width: 1.4;
+      stroke-dasharray: 8 4 2 4;
+      animation: slowSpin 10s linear infinite;
+      transform-box: fill-box;
+      transform-origin: center;
+      pointer-events: none;
+    }
+
+    /* Map Controls (Top-Left / Right Floating) */
+    #map-controls {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 25;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .hud-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-hud);
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.18s ease;
+      font-size: 16px;
+      font-weight: 700;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    .hud-btn:hover {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: var(--cyan-bright);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.3);
+    }
+
+    .hud-btn.active {
+      background: rgba(255, 216, 107, 0.2);
+      border-color: var(--tier-5);
+      color: var(--tier-5);
+    }
+
+    /* Telemetry Bar (Bottom-Left) */
+    #telemetry-bar {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      z-index: 25;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-hud);
+      border-radius: 6px;
+      padding: 8px 14px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 11px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    }
+
+    .tele-stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tele-label {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .tele-val {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--cyan-bright);
+    }
+
+    .tele-val.gold {
+      color: var(--tier-5);
+    }
+
+    /* Legend Panel (Bottom-Right) */
+    #legend-panel {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      z-index: 25;
+      width: 248px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-gold);
+      border-radius: 8px;
+      padding: 12px 14px;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65);
+    }
+
+    .hud-corner-box {
+      position: relative;
+    }
+
+    .hud-corner-box::before,
+    .hud-corner-box::after {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      pointer-events: none;
+    }
+
+    .hud-corner-box::before {
+      top: -1px;
+      left: -1px;
+      border-top: 2px solid var(--cyan-bright);
+      border-left: 2px solid var(--cyan-bright);
+      border-top-left-radius: 4px;
+    }
+
+    .hud-corner-box::after {
+      bottom: -1px;
+      right: -1px;
+      border-bottom: 2px solid var(--tier-5);
+      border-right: 2px solid var(--tier-5);
+      border-bottom-right-radius: 4px;
+    }
+
+    .legend-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 9px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(255, 216, 107, 0.18);
+    }
+
+    .legend-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--tier-5);
+      letter-spacing: 0.04em;
+    }
+
+    .legend-sub {
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+
+    .legend-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-main);
+    }
+
+    .legend-swatch-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-swatch {
+      width: 16px;
+      height: 10px;
+      border-radius: 2px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      flex-shrink: 0;
+    }
+
+    .legend-score {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .legend-divider {
+      height: 1px;
+      background: rgba(56, 189, 248, 0.15);
+      margin: 7px 0;
+    }
+
+    .legend-markers-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .legend-markers-row span {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Hover Tooltip */
+    #hover-tooltip {
+      position: fixed;
+      z-index: 60;
+      pointer-events: none;
+      width: 280px;
+      background: rgba(4, 13, 28, 0.94);
+      border: 1px solid var(--cyan-bright);
+      border-radius: 8px;
+      padding: 12px 14px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 18px rgba(0, 229, 255, 0.18);
+      backdrop-filter: blur(14px);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+      display: none;
+    }
+
+    #hover-tooltip.visible {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .tt-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .tt-country {
+      font-size: 16px;
+      font-weight: 900;
+      color: #fff;
+      line-height: 1.2;
+    }
+
+    .tt-en {
+      font-size: 10px;
+      color: var(--cyan);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .tt-continent {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(56, 189, 248, 0.14);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: var(--cyan-bright);
+      white-space: nowrap;
+    }
+
+    .tt-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 9px;
+      padding: 7px 8px;
+      background: rgba(11, 28, 54, 0.72);
+      border-radius: 5px;
+      border: 1px solid rgba(255, 216, 107, 0.16);
+    }
+
+    .tt-metric-label {
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+
+    .tt-metric-value {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--tier-5);
+    }
+
+    .tt-spots-title {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+      letter-spacing: 0.04em;
+    }
+
+    .tt-spots-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 8px;
+    }
+
+    .tt-spot-chip {
+      font-size: 11px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: rgba(234, 179, 56, 0.12);
+      border: 1px solid rgba(234, 179, 56, 0.35);
+      color: #fef3c7;
+    }
+
+    .tt-cta {
+      font-size: 10px;
+      color: var(--cyan);
+      letter-spacing: 0.06em;
+      border-top: 1px dashed rgba(56, 189, 248, 0.25);
+      padding-top: 6px;
+    }
+
+    /* Slide-Over Intelligence Briefing Drawer */
+    #briefing-drawer {
+      position: fixed;
+      top: 60px;
+      right: 16px;
+      bottom: 16px;
+      width: 430px;
+      max-width: calc(100vw - 32px);
+      z-index: 55;
+      background: rgba(5, 14, 30, 0.94);
+      border: 1px solid var(--cyan);
+      border-radius: 10px;
+      backdrop-filter: blur(18px);
+      box-shadow: -10px 10px 44px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.16);
+      display: flex;
+      flex-direction: column;
+      transform: translateX(calc(100% + 36px));
+      transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+      overflow: hidden;
+    }
+
+    #briefing-drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 16px 18px 14px;
+      background: linear-gradient(135deg, rgba(11, 30, 62, 0.95) 0%, rgba(5, 14, 30, 0.95) 100%);
+      border-bottom: 1px solid rgba(56, 189, 248, 0.28);
+      position: relative;
+    }
+
+    .drawer-kicker-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .drawer-kicker {
+      font-size: 10px;
+      letter-spacing: 0.16em;
+      color: var(--cyan-bright);
+      text-transform: uppercase;
+    }
+
+    .drawer-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .drawer-action-btn {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: var(--cyan-bright);
+      font-size: 11px;
+      padding: 4px 9px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.18s;
+    }
+
+    .drawer-action-btn:hover {
+      background: rgba(56, 189, 248, 0.28);
+      color: #fff;
+    }
+
+    .drawer-close-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 4px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: #fca5a5;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .drawer-close-btn:hover {
+      background: rgba(239, 68, 68, 0.3);
+      color: #fff;
+    }
+
+    .drawer-country-title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .drawer-country-zh {
+      font-size: 24px;
+      font-weight: 900;
+      color: #fff;
+    }
+
+    .drawer-country-en {
+      font-size: 12px;
+      color: var(--tier-5);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .drawer-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .drawer-meta-box {
+      background: rgba(6, 17, 36, 0.75);
+      border: 1px solid rgba(56, 189, 248, 0.18);
+      border-radius: 5px;
+      padding: 7px 9px;
+    }
+
+    .drawer-meta-label {
+      font-size: 9px;
+      color: var(--text-dim);
+      margin-bottom: 2px;
+    }
+
+    .drawer-meta-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    .drawer-meta-val.gold {
+      color: var(--tier-5);
+    }
+
+    .popularity-bar-track {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      margin-top: 10px;
+      overflow: hidden;
+    }
+
+    .popularity-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--tier-2), var(--tier-5));
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(56, 189, 248, 0.4) transparent;
+    }
+
+    .drawer-body::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .drawer-body::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.35);
+      border-radius: 3px;
+    }
+
+    /* Attraction Card */
+    .attraction-card {
+      background: rgba(9, 23, 46, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .attraction-card.focused {
+      border-color: var(--tier-5);
+      box-shadow: 0 0 20px rgba(255, 216, 107, 0.22);
+    }
+
+    .card-photo-wrap {
+      position: relative;
+      width: 100%;
+      height: 184px;
+      background: #061224;
+      overflow: hidden;
+      cursor: zoom-in;
+    }
+
+    .card-photo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.45s ease, opacity 0.3s ease;
+      opacity: 0;
+    }
+
+    .card-photo.loaded {
+      opacity: 1;
+    }
+
+    .card-photo-wrap:hover .card-photo.loaded {
+      transform: scale(1.04);
+    }
+
+    .photo-loader {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--cyan);
+      font-size: 11px;
+      background: linear-gradient(120deg, #061224 30%, #0b2242 50%, #061224 70%);
+      background-size: 200% 100%;
+      animation: shimmer 1.6s infinite linear;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    .photo-overlay-hud {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(to top, rgba(4, 12, 26, 0.88) 0%, transparent 45%);
+    }
+
+    .photo-tag {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: rgba(3, 9, 20, 0.82);
+      border: 1px solid var(--tier-5);
+      color: var(--tier-5);
+      backdrop-filter: blur(6px);
+    }
+
+    .photo-coords {
+      position: absolute;
+      bottom: 8px;
+      right: 10px;
+      font-size: 10px;
+      color: rgba(226, 232, 240, 0.85);
+      text-shadow: 0 1px 4px #000;
+    }
+
+    .photo-zoom-hint {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font-size: 10px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: rgba(3, 9, 20, 0.75);
+      color: var(--cyan-bright);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .card-photo-wrap:hover .photo-zoom-hint {
+      opacity: 1;
+    }
+
+    .card-content {
+      padding: 12px 14px 14px;
+    }
+
+    .card-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #f8fafc;
+    }
+
+    .card-en {
+      font-size: 11px;
+      color: var(--cyan);
+      margin-top: 1px;
+    }
+
+    .locate-btn {
+      flex-shrink: 0;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: var(--cyan-bright);
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+
+    .locate-btn:hover {
+      background: var(--cyan);
+      color: #020712;
+      font-weight: 700;
+    }
+
+    .season-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #fde68a;
+      background: rgba(245, 158, 11, 0.14);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      padding: 4px 9px;
+      border-radius: 4px;
+      margin-bottom: 9px;
+    }
+
+    .card-desc {
+      font-size: 13px;
+      line-height: 1.65;
+      color: #cbd5e1;
+      text-align: justify;
+    }
+
+    /* Loading Overlay */
+    #map-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 80;
+      background: radial-gradient(circle at center, #081833 0%, #020712 80%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      transition: opacity 0.45s ease;
+    }
+
+    #map-loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .radar-spinner {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 2px solid rgba(56, 189, 248, 0.2);
+      border-top-color: var(--cyan-bright);
+      border-right-color: var(--tier-5);
+      animation: slowSpin 1s linear infinite;
+    }
+
+    .loading-text {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      color: var(--cyan-bright);
+    }
+
+    /* Photo Lightbox Modal */
+    #photo-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 120;
+      background: rgba(2, 6, 15, 0.9);
+      backdrop-filter: blur(10px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    #photo-modal.open {
+      display: flex;
+    }
+
+    .modal-frame {
+      position: relative;
+      max-width: 920px;
+      width: 100%;
+      background: #061224;
+      border: 1px solid var(--cyan);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
+    }
+
+    .modal-img {
+      width: 100%;
+      max-height: 75vh;
+      object-fit: contain;
+      background: #02060f;
+      display: block;
+    }
+
+    .modal-caption {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(56, 189, 248, 0.22);
+    }
+
+    .modal-close {
+      background: rgba(239, 68, 68, 0.18);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: #fecaca;
+      padding: 5px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+    }
+
+    /* Responsive Adjustments (Mobile & Tablet) */
+    @media (max-width: 960px) {
+      .mission-clock {
+        display: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      #top-hud {
+        padding: 8px 12px;
+        gap: 8px;
+      }
+
+      .brand-main {
+        font-size: 14px;
+      }
+
+      .controls-cluster {
+        width: 100%;
+        justify-content: stretch;
+      }
+
+      .search-wrapper {
+        width: 100%;
+      }
+
+      #map-controls {
+        top: 10px;
+        left: 10px;
+      }
+
+      .hud-btn {
+        width: 34px;
+        height: 34px;
+      }
+
+      #telemetry-bar {
+        display: none;
+      }
+
+      #legend-panel {
+        bottom: 10px;
+        right: 10px;
+        width: 210px;
+        padding: 9px 11px;
+      }
+
+      .legend-title {
+        font-size: 11px;
+      }
+
+      .legend-row {
+        font-size: 10px;
+      }
+
+      #briefing-drawer {
+        top: auto;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: auto;
+        max-width: none;
+        height: 78vh;
+        transform: translateY(calc(100% + 24px));
+      }
+
+      #briefing-drawer.open {
+        transform: translateY(0);
+      }
+
+      #hover-tooltip {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="hud-scanline"></div>
+  <div id="hud-vignette"></div>
+
+  <div id="app">
+    <!-- Top Command Header -->
+    <header id="top-hud">
+      <div class="brand-group">
+        <div class="imf-emblem" title="IMF Global Tourism Command">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2">
+            <circle cx="12" cy="12" r="9"></circle>
+            <ellipse cx="12" cy="12" rx="4" ry="9"></ellipse>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+          </svg>
+        </div>
+        <div class="brand-titles">
+          <div class="brand-kicker mono">
+            <span class="status-dot"></span>
+            IMF // 2026 全球旅遊情報指揮中心
+          </div>
+          <h1 class="brand-main">GLOBAL TOURISM <span>INTELLIGENCE MAP</span></h1>
+        </div>
+      </div>
+
+      <div class="controls-cluster">
+        <div class="search-wrapper">
+          <div class="search-input-box">
+            <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input id="search-input" type="text" placeholder="搜尋國家或旅遊景點（如：日本、馬丘比丘）..." autocomplete="off" />
+            <button id="search-clear" title="清除搜尋">✕</button>
+          </div>
+          <div id="search-dropdown"></div>
+        </div>
+
+        <div id="continent-filters" role="tablist" aria-label="洲別篩選">
+          <button class="filter-pill active" data-continent="全部">全部 (60)</button>
+          <button class="filter-pill" data-continent="亞洲">亞洲</button>
+          <button class="filter-pill" data-continent="歐洲">歐洲</button>
+          <button class="filter-pill" data-continent="北美洲">北美洲</button>
+          <button class="filter-pill" data-continent="南美洲">南美洲</button>
+          <button class="filter-pill" data-continent="非洲">非洲</button>
+          <button class="filter-pill" data-continent="大洋洲">大洋洲</button>
+          <button class="filter-pill" data-continent="南極洲">南極洲</button>
+        </div>
+
+        <div class="mission-clock mono">
+          <span id="clock-time">2026-11-13 09:30:00</span>
+          <span>SATELLITE LINK // ACTIVE</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Map Stage -->
+    <main id="map-stage">
+      <div id="map-loading">
+        <div class="radar-spinner"></div>
+        <div class="loading-text mono">INITIALIZING GLOBAL GEOSPATIAL MATRIX...</div>
+      </div>
+
+      <svg id="world-map" aria-label="2026 全球旅遊勝地互動世界地圖"></svg>
+
+      <!-- Map Zoom & Layer Controls -->
+      <div id="map-controls">
+        <button class="hud-btn" id="btn-zoom-in" title="放大地圖">+</button>
+        <button class="hud-btn" id="btn-zoom-out" title="縮小地圖">−</button>
+        <button class="hud-btn" id="btn-zoom-reset" title="重置全球視角">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+          </svg>
+        </button>
+        <button class="hud-btn active" id="btn-toggle-markers" title="切換國家與景點互動標記">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+            <circle cx="12" cy="10" r="3"></circle>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Bottom-Left Live Telemetry -->
+      <div id="telemetry-bar" class="hud-corner-box">
+        <div class="tele-stat">
+          <span class="tele-label mono">ACTIVE TARGETS</span>
+          <span class="tele-val gold mono" id="stat-countries">60 國 / 145 景點</span>
+        </div>
+        <div class="tele-stat">
+          <span class="tele-label mono">CONTINENTS</span>
+          <span class="tele-val mono" id="stat-continent">全球七大洲</span>
+        </div>
+        <div class="tele-stat">
+          <span class="tele-label mono">CURSOR COORDS</span>
+          <span class="tele-val mono" id="stat-coords">0.00°, 0.00°</span>
+        </div>
+      </div>
+
+      <!-- Bottom-Right Gold Intensity Legend -->
+      <div id="legend-panel" class="hud-corner-box">
+        <div class="legend-header">
+          <span class="legend-title">2026 旅遊熱門程度圖例</span>
+          <span class="legend-sub mono">TIER 1-5</span>
+        </div>
+        <div class="legend-list">
+          <div class="legend-row">
+            <div class="legend-swatch-group">
+              <span class="legend-swatch" style="background: var(--tier-5); box-shadow: 0 0 8px rgba(255,216,107,0.6);"></span>
+              <span>旗艦聖地（極致熱門）</span>
+            </div>
+            <span class="legend-score mono">93–100</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-swatch-group">
+              <span class="legend-swatch" style="background: var(--tier-4);"></span>
+              <span>頂級樞紐（全球焦點）</span>
+            </div>
+            <span class="legend-score mono">85–92</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-swatch-group">
+              <span class="legend-swatch" style="background: var(--tier-3);"></span>
+              <span>國際名勝（高度熱門）</span>
+            </div>
+            <span class="legend-score mono">75–84</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-swatch-group">
+              <span class="legend-swatch" style="background: var(--tier-2);"></span>
+              <span>文化精選（深度旅遊）</span>
+            </div>
+            <span class="legend-score mono">65–74</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-swatch-group">
+              <span class="legend-swatch" style="background: var(--tier-1);"></span>
+              <span>極境秘境（探險熱點）</span>
+            </div>
+            <span class="legend-score mono">50–64</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-swatch-group">
+              <span class="legend-swatch" style="background: var(--country-base);"></span>
+              <span>其他未收錄地區</span>
+            </div>
+            <span class="legend-score mono">—</span>
+          </div>
+        </div>
+        <div class="legend-divider"></div>
+        <div class="legend-markers-row">
+          <span>
+            <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="#ffd86b" stroke="#030812" stroke-width="1"/></svg>
+            目標國家節點
+          </span>
+          <span>
+            <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,1 9,5 5,9 1,5" fill="#00e5ff"/></svg>
+            景點座標標記
+          </span>
+        </div>
+      </div>
+
+      <!-- Hover Tooltip -->
+      <div id="hover-tooltip" class="hud-corner-box">
+        <div class="tt-top">
+          <div>
+            <div class="tt-country" id="tt-country">國家名稱</div>
+            <div class="tt-en mono" id="tt-en">COUNTRY</div>
+          </div>
+          <span class="tt-continent" id="tt-continent">亞洲</span>
+        </div>
+        <div class="tt-metrics">
+          <div>
+            <div class="tt-metric-label mono">收錄景點數量</div>
+            <div class="tt-metric-value mono" id="tt-count">3 處</div>
+          </div>
+          <div>
+            <div class="tt-metric-label mono">2026 熱門指數</div>
+            <div class="tt-metric-value mono" id="tt-pop">96 / 100</div>
+          </div>
+        </div>
+        <div class="tt-spots-title">代表性旅遊景點：</div>
+        <div class="tt-spots-list" id="tt-spots"></div>
+        <div class="tt-cta mono">▶ 點擊國家開啟實景照片與旅遊情資</div>
+      </div>
+    </main>
+
+    <!-- Slide-Over Intelligence Briefing Drawer -->
+    <aside id="briefing-drawer" aria-hidden="true">
+      <div class="drawer-header">
+        <div class="drawer-kicker-row">
+          <span class="drawer-kicker mono" id="drawer-kicker">DOSSIER // TARGET LOCKED</span>
+          <div class="drawer-actions">
+            <button class="drawer-action-btn" id="drawer-focus-btn" title="縮放至該國">⌖ 鎖定視角</button>
+            <button class="drawer-close-btn" id="drawer-close-btn" title="關閉情報面板">✕</button>
+          </div>
+        </div>
+        <div class="drawer-country-title">
+          <h2 class="drawer-country-zh" id="drawer-country-zh">—</h2>
+          <span class="drawer-country-en mono" id="drawer-country-en">—</span>
+        </div>
+        <div class="drawer-meta-grid">
+          <div class="drawer-meta-box">
+            <div class="drawer-meta-label">所屬洲別</div>
+            <div class="drawer-meta-val" id="drawer-continent">—</div>
+          </div>
+          <div class="drawer-meta-box">
+            <div class="drawer-meta-label">收錄景點</div>
+            <div class="drawer-meta-val gold mono" id="drawer-count">—</div>
+          </div>
+          <div class="drawer-meta-box">
+            <div class="drawer-meta-label">2026 熱門指數</div>
+            <div class="drawer-meta-val gold mono" id="drawer-pop">—</div>
+          </div>
+        </div>
+        <div class="popularity-bar-track">
+          <div class="popularity-bar-fill" id="drawer-pop-bar" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <div class="drawer-body" id="drawer-attractions"></div>
+    </aside>
+
+    <!-- Lightbox Modal for Real Photos -->
+    <div id="photo-modal" role="dialog" aria-modal="true">
+      <div class="modal-frame">
+        <img class="modal-img" id="modal-img" src="" alt="" />
+        <div class="modal-caption">
+          <div>
+            <div id="modal-title" style="font-weight: 800; font-size: 15px; color: #fff;"></div>
+            <div id="modal-sub" class="mono" style="font-size: 11px; color: var(--cyan); margin-top: 2px;"></div>
+          </div>
+          <button class="modal-close" id="modal-close">✕ 關閉檢視</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. GLOBAL TOURISM DATASET (60 COUNTRIES / 145 ATTRACTIONS / 7 CONTINENTS)
+    // =========================================================================
+    const TOURISM_DATA = [
+      // -------------------- 亞洲 ASIA (17) --------------------
+      {
+        id: "158", name: "台灣", enName: "Taiwan", continent: "亞洲",
+        coords: [120.96, 23.69], popularity: 91, tier: 4,
+        attractions: [
+          { name: "台北101", enName: "Taipei 101", wiki: "Taipei_101", coords: [121.5645, 25.0339], tag: "地標建築", season: "10月–次年4月（秋冬季氣候舒爽、跨年煙火盛典）", desc: "曾為世界第一高樓的台北天際線核心，融合竹節意象與阻尼器抗震科技。登上89樓觀景台可360度俯瞰台北盆地與群山環繞的壯麗日夜全景。" },
+          { name: "太魯閣國家公園", enName: "Taroko National Park", wiki: "Taroko_National_Park", coords: [121.491, 24.158], tag: "自然奇景", season: "4月–6月、9月–11月（避開夏季颱風與梅雨季）", desc: "立霧溪歷經數百萬年切割大理岩層形成的垂直峽谷奇觀。燕子口、九曲洞與清水斷崖展現太平洋與中央山脈交會的磅礴地質張力。" },
+          { name: "日月潭", enName: "Sun Moon Lake", wiki: "Sun_Moon_Lake", coords: [120.916, 23.857], tag: "湖光山色", season: "3月–5月（春櫻與螢火蟲）、10月–12月（花火嘉年華）", desc: "台灣最大的高山天然湖泊，清晨薄霧繚繞如水墨畫卷。環湖自行車道被譽為全球最美單車路線之一，兼具邵族文化與茶鄉風情。" }
+        ]
+      },
+      {
+        id: "392", name: "日本", enName: "Japan", continent: "亞洲",
+        coords: [138.25, 36.2], popularity: 99, tier: 5,
+        attractions: [
+          { name: "富士山", enName: "Mount Fuji", wiki: "Mount_Fuji", coords: [138.7274, 35.3606], tag: "世界遺產", season: "7月–9月上旬（登山季）；11月–2月（冬日雪頂最清晰）", desc: "日本精神象徵與完美圓錐形休眠火山，海拔3,776公尺。河口湖倒映的逆富士與春櫻、秋楓交織，構成全球旅人最嚮往的經典畫面。" },
+          { name: "京都清水寺", enName: "Kiyomizu-dera", wiki: "Kiyomizu-dera", coords: [135.785, 34.9949], tag: "文化古蹟", season: "3月下旬–4月（櫻花季）、11月中旬–12月初（楓紅夜參）", desc: "建於音羽山懸崖上的千年古剎，未使用一根釘子的「清水舞台」凌空而立。四季櫻花與紅葉環抱古都京都市景，韻味深厚。" },
+          { name: "東京淺草寺", enName: "Sensō-ji", wiki: "Sensō-ji", coords: [139.7967, 35.7148], tag: "歷史名勝", season: "全年皆宜（春季隅田川櫻花、冬季正月參拜）", desc: "東京最古老的佛教寺院，雷門巨型紅燈籠與熱鬧的仲見世通商店街保存濃厚江戶下町風情，與不遠處的晴空塔形成古今對話。" }
+        ]
+      },
+      {
+        id: "410", name: "南韓", enName: "South Korea", continent: "亞洲",
+        coords: [127.76, 35.9], popularity: 90, tier: 4,
+        attractions: [
+          { name: "景福宮", enName: "Gyeongbokgung", wiki: "Gyeongbokgung", coords: [126.977, 37.5796], tag: "文化古蹟", season: "4月–5月、9月–11月（穿韓服漫步宮闕最舒適）", desc: "朝鮮王朝正宮與五大宮闕之首，勤政殿與慶會樓展現莊嚴對稱的東亞宮廷美學。背景北漢山襯托四季更迭，並有守門將換崗儀式。" },
+          { name: "濟州漢拏山", enName: "Hallasan", wiki: "Hallasan", coords: [126.529, 33.3617], tag: "自然奇景", season: "5月–6月（杜鵑花海）、10月–11月（楓葉）、1月（雪景）", desc: "南韓最高峰與火山盾地貌核心，山頂白鹿潭火山口湖景致壯闊。整座濟州島因火山熔岩洞窟與豐富生態列入世界自然遺產。" },
+          { name: "N首爾塔", enName: "N Seoul Tower", wiki: "N_Seoul_Tower", coords: [126.9882, 37.5512], tag: "地標建築", season: "全年皆宜（春秋黃昏日落與百萬夜景最佳）", desc: "矗立於南山山頂的首爾代表性地標，乘纜車登頂可俯瞰漢江蜿蜒穿城而過的繁華都會，是浪漫愛情鎖與夜景攝影勝地。" }
+        ]
+      },
+      {
+        id: "156", name: "中國", enName: "China", continent: "亞洲",
+        coords: [104.19, 35.86], popularity: 94, tier: 5,
+        attractions: [
+          { name: "萬里長城", enName: "Great Wall of China", wiki: "Great_Wall_of_China", coords: [116.5704, 40.4319], tag: "世界遺產", season: "4月–5月、9月–10月（慕田峪與金山嶺秋色絕美）", desc: "橫亙華北山脊兩萬餘公里的古代軍事防禦奇蹟，八達嶺、慕田峪與金山嶺各具險峻風貌，展現人類史上最宏偉的建築工程。" },
+          { name: "張家界國家森林公園", enName: "Zhangjiajie National Forest Park", wiki: "Zhangjiajie_National_Forest_Park", coords: [110.434, 29.325], tag: "自然奇景", season: "4月–6月、9月–11月（雲海翻湧、氣候宜人）", desc: "三千餘座石英砂岩峰林拔地而起，成為電影《阿凡達》懸浮山的靈感來源。搭乘百龍天梯穿梭雲霧峰柱之間宛如置身仙境。" },
+          { name: "北京故宮博物院", enName: "Forbidden City", wiki: "Forbidden_City", coords: [116.397, 39.9163], tag: "世界遺產", season: "9月–11月（秋高氣爽）、12月–2月（雪落紅牆）", desc: "世界上現存規模最大、保存最完整的木結構宮殿建築群。紅牆黃瓦與九千餘間殿宇承載明清兩代皇權歷史與珍貴文物瑰寶。" }
+        ]
+      },
+      {
+        id: "764", name: "泰國", enName: "Thailand", continent: "亞洲",
+        coords: [100.99, 15.87], popularity: 95, tier: 5,
+        attractions: [
+          { name: "曼谷大皇宮", enName: "Grand Palace", wiki: "Grand_Palace", coords: [100.4913, 13.75], tag: "文化古蹟", season: "11月–次年2月（涼季乾爽不悶熱）", desc: "湄南河畔金碧輝煌的暹羅王朝建築群，融合泰式尖塔與歐陸新古典元素，玉佛寺內供奉泰國最神聖的翡翠玉佛。" },
+          { name: "清邁雙龍寺", enName: "Wat Phra That Doi Suthep", wiki: "Wat_Phra_That_Doi_Suthep", coords: [98.9216, 18.8049], tag: "宗教聖地", season: "11月–2月（山區清涼且逢天燈節慶）", desc: "位於素貼山巔的蘭納王朝金色佛寺，須攀登309級納迦龍階方能抵達，寺內金色舍利塔耀眼奪目，可遠眺清邁古城全景。" },
+          { name: "攀牙灣", enName: "Phang Nga Bay", wiki: "Phang_Nga_Bay", coords: [98.5, 8.275], tag: "海島度假", season: "12月–4月（安達曼海風平浪靜、海水湛藍）", desc: "普吉島東北側壯觀的喀斯特海上石林群，翠綠海面矗立數十座垂直石灰岩島嶼與隱密海蝕洞，划獨木舟探索宛若海上秘境。" }
+        ]
+      },
+      {
+        id: "704", name: "越南", enName: "Vietnam", continent: "亞洲",
+        coords: [108.27, 14.05], popularity: 87, tier: 4,
+        attractions: [
+          { name: "下龍灣", enName: "Hạ Long Bay", wiki: "Hạ_Long_Bay", coords: [107.1839, 20.9101], tag: "世界遺產", season: "3月–5月、9月–11月（能見度高、海面平靜）", desc: "北部灣近兩千座石灰岩島嶼與喀斯特溶洞星羅棋布，搭乘傳統木帆船宿於碧波之間，日出與夕照映照群峰如海上桂林。" },
+          { name: "會安古鎮", enName: "Hội An", wiki: "Hội_An", coords: [108.338, 15.8801], tag: "世界遺產", season: "2月–5月（旱季晴朗，最適合夜賞燈籠）", desc: "15至19世紀東南亞重要貿易港，完美保留中式會館、日本來遠橋與法式黃牆建築。入夜後秋盆河畔萬盞絲綢燈籠點亮夜色。" }
+        ]
+      },
+      {
+        id: "360", name: "印尼", enName: "Indonesia", continent: "亞洲",
+        coords: [113.92, -0.78], popularity: 89, tier: 4,
+        attractions: [
+          { name: "峇里島烏魯瓦圖神廟", enName: "Uluwatu Temple", wiki: "Uluwatu_Temple", coords: [115.0849, -8.8291], tag: "文化古蹟", season: "4月–10月（旱季陽光燦爛，浪況極佳）", desc: "建於70公尺高垂直懸崖邊的古老印度教海神廟，面對無垠印度洋。黃昏時分於懸崖劇場欣賞凱卡克火舞搭配火燒雲落日最為震撼。" },
+          { name: "婆羅浮屠", enName: "Borobudur", wiki: "Borobudur", coords: [110.2038, -7.6079], tag: "世界遺產", season: "5月–9月（日出雲海清晰度最高）", desc: "爪哇島九世紀建造的世界最大佛教單體建築，九層壇台與七十二座鐘形佛塔佈滿精緻浮雕，黎明薄霧中見證千年佛國光輝。" },
+          { name: "科莫多國家公園", enName: "Komodo National Park", wiki: "Komodo_National_Park", coords: [119.4833, -8.55], tag: "自然奇景", season: "4月–11月（適合潛水與登島健行）", desc: "世上僅存的史前巨蜥「科莫多龍」棲息地，並擁有夢幻粉紅沙灘與帕達爾島三色海灣交匯奇景，海域更是世界級潛水天堂。" }
+        ]
+      },
+      {
+        id: "458", name: "馬來西亞", enName: "Malaysia", continent: "亞洲",
+        coords: [101.97, 4.21], popularity: 82, tier: 3,
+        attractions: [
+          { name: "吉隆坡雙峰塔", enName: "Petronas Towers", wiki: "Petronas_Towers", coords: [101.7117, 3.1579], tag: "地標建築", season: "全年皆宜（5月–9月降雨較少）", desc: "高452公尺的雙子摩天大樓，以伊斯蘭幾何星形平面打造，41層空中天橋連接兩塔，夜幕下銀白鋼構閃耀如未來都市燈塔。" },
+          { name: "馬六甲歷史城", enName: "Malacca City", wiki: "Malacca_City", coords: [102.2501, 2.1896], tag: "世界遺產", season: "3月–10月（避開東北季風強雨期）", desc: "見證葡萄牙、荷蘭、英國與華人峇峇娘惹文化交融的海峽古城，荷蘭紅屋廣場與雞場街夜市展現獨特的多元南洋風華。" }
+        ]
+      },
+      {
+        id: "702", name: "新加坡", enName: "Singapore", continent: "亞洲",
+        coords: [103.8198, 1.3521], popularity: 91, tier: 4,
+        attractions: [
+          { name: "濱海灣金沙", enName: "Marina Bay Sands", wiki: "Marina_Bay_Sands", coords: [103.8607, 1.2834], tag: "地標建築", season: "全年皆宜（2月–4月相對乾爽）", desc: "三座高塔托起57樓空中花園與世界最高無邊際泳池，堪稱21世紀亞洲建築奇蹟，每晚水舞雷射秀將海灣化為科幻舞台。" },
+          { name: "濱海灣花園", enName: "Gardens by the Bay", wiki: "Gardens_by_the_Bay", coords: [103.8636, 1.2816], tag: "生態奇觀", season: "全年皆宜（夜間超級樹燈光秀必看）", desc: "將熱帶生態與永續能源結合的未來花園，18座擎天超級樹搭配雲霧林室內瀑布溫室，打造宛如科幻電影的綠色烏托邦。" }
+        ]
+      },
+      {
+        id: "356", name: "印度", enName: "India", continent: "亞洲",
+        coords: [78.96, 20.59], popularity: 88, tier: 4,
+        attractions: [
+          { name: "泰姬瑪哈陵", enName: "Taj Mahal", wiki: "Taj_Mahal", coords: [78.0421, 27.1751], tag: "世界遺產", season: "10月–次年3月（涼季晨曦光影最柔和）", desc: "蒙兀兒帝王沙賈汗為愛妻修築的純白大理石陵寢，鑲嵌半寶石與對稱倒影水池，隨日光變換粉紅、純白與金黃色澤。" },
+          { name: "齋浦爾琥珀堡", enName: "Amber Fort", wiki: "Amber_Fort", coords: [75.8513, 26.9855], tag: "文化古蹟", season: "10月–3月（粉紅城市氣候宜人）", desc: "雄踞山丘之上的拉賈斯坦邦砂岩與大理石城堡，內部「鏡宮」以數萬片凸面玻璃鑲嵌穹頂，僅需一燭即可折射萬千星光。" },
+          { name: "瓦拉納西恆河", enName: "Varanasi", wiki: "Varanasi", coords: [83.0104, 25.3176], tag: "宗教聖地", season: "11月–2月（氣候溫和，晨霧船遊最動人）", desc: "人類最古老的活歷史聖城之一，黎明時分乘木船沿恆河階梯碼頭前行，見證千年不息的沐浴祈禱與夜晚壯觀的夜祭火典。" }
+        ]
+      },
+      {
+        id: "524", name: "尼泊爾", enName: "Nepal", continent: "亞洲",
+        coords: [84.12, 28.39], popularity: 72, tier: 2,
+        attractions: [
+          { name: "聖母峰基地營", enName: "Everest Base Camp", wiki: "Everest_Base_Camp", coords: [86.8528, 28.0026], tag: "極限健行", season: "3月–5月、10月–11月（能見度最高、雪峰澄澈）", desc: "全球健行者心中的終極朝聖路線，穿越夏爾巴村落與懸索吊橋，在海拔5,364公尺近距離仰望世界最高峰聖母峰的凜冽威儀。" },
+          { name: "博達哈大佛塔", enName: "Boudhanath", wiki: "Boudhanath", coords: [85.362, 27.7215], tag: "世界遺產", season: "10月–4月（乾季天朗氣清）", desc: "喜馬拉雅山麓規模最大的圓頂藏傳佛塔，塔身繪有慈悲佛眼，五色經幡隨山風飛舞，信徒順時針轉經祈福氣氛寧靜神聖。" }
+        ]
+      },
+      {
+        id: "116", name: "柬埔寨", enName: "Cambodia", continent: "亞洲",
+        coords: [104.99, 12.56], popularity: 80, tier: 3,
+        attractions: [
+          { name: "吳哥窟", enName: "Angkor Wat", wiki: "Angkor_Wat", coords: [103.867, 13.4125], tag: "世界遺產", season: "11月–3月（涼爽乾季，清晨看荷花池日出最佳）", desc: "高棉帝國鼎盛時期建造的世界上最大宗教建築群，五座蓮花苞形主塔倒映護城河中，石壁浮雕訴說千年神話史詩。" },
+          { name: "巴戎寺", enName: "Bayon", wiki: "Bayon", coords: [103.8589, 13.4413], tag: "文化古蹟", season: "11月–3月（光影斜射四面佛像最立體）", desc: "大吳哥城中心以「高棉的微笑」聞名於世的神廟，49座石塔四面皆雕刻著神態安詳慈悲的巨大菩薩面容，神秘而震撼。" }
+        ]
+      },
+      {
+        id: "608", name: "菲律賓", enName: "Philippines", continent: "亞洲",
+        coords: [121.77, 12.87], popularity: 79, tier: 3,
+        attractions: [
+          { name: "巴拉望愛妮島", enName: "El Nido, Palawan", wiki: "El_Nido,_Palawan", coords: [119.407, 11.1956], tag: "海島度假", season: "12月–5月（乾季海水如翡翠水晶般透明）", desc: "被譽為亞洲最後一片處女地，高聳黑色大理石峭壁環抱碧綠潟湖與白沙灘，跳島浮潛可見豐富珊瑚礁與海龜生態。" },
+          { name: "薄荷島巧克力山", enName: "Chocolate Hills", wiki: "Chocolate_Hills", coords: [124.167, 9.8297], tag: "自然奇景", season: "2月–5月（旱季草皮轉為深褐色，最像松露巧克力）", desc: "薄荷島中部超過1,200座圓錐形喀斯特小山丘整齊排列，旱季時綠草枯黃化作連綿巧克力山海，為罕見的石灰岩地質奇觀。" }
+        ]
+      },
+      {
+        id: "792", name: "土耳其", enName: "Turkey", continent: "亞洲",
+        coords: [35.24, 38.96], popularity: 91, tier: 4,
+        attractions: [
+          { name: "卡帕多奇亞", enName: "Cappadocia", wiki: "Cappadocia", coords: [34.8289, 38.6431], tag: "世界遺產", season: "4月–6月、9月–10月（氣流穩定最適合搭熱氣球）", desc: "火山灰凝灰岩歷經風雨侵蝕形成外星般的精靈煙囪與洞穴教堂。破曉時分百顆繽紛熱氣球齊飛，成就人生必看奇景。" },
+          { name: "聖索菲亞大教堂", enName: "Hagia Sophia", wiki: "Hagia_Sophia", coords: [28.9802, 41.0086], tag: "文化古蹟", season: "4月–5月、9月–11月（伊斯坦堡氣候最舒適）", desc: "橫跨拜占庭帝國與鄂圖曼帝國千年的建築奇蹟，巨大懸浮穹頂與基督教馬賽克、阿拉伯書法圓盤並存，見證歐亞文明交會。" },
+          { name: "棉堡", enName: "Pamukkale", wiki: "Pamukkale", coords: [29.1209, 37.9204], tag: "世界遺產", season: "4月–6月、9月–10月（避免盛夏烈日反光）", desc: "含鈣溫泉水沿山坡流淌沉積出的純白石灰華階梯池，遠望如潔白棉山，山頂還保存完整的古羅馬希拉波利斯劇場遺址。" }
+        ]
+      },
+      {
+        id: "784", name: "阿拉伯聯合大公國", enName: "UAE", continent: "亞洲",
+        coords: [53.84, 23.42], popularity: 92, tier: 4,
+        attractions: [
+          { name: "杜拜哈里發塔", enName: "Burj Khalifa", wiki: "Burj_Khalifa", coords: [55.2744, 25.1972], tag: "地標建築", season: "11月–次年3月（涼爽宜人，適合戶外活動）", desc: "高828公尺的世界第一高樓，銀針般的螺旋塔尖直插沙漠雲霄。登上148樓觀景台可鳥瞰波斯灣人工棕櫚島與科幻天際線。" },
+          { name: "謝赫扎耶德大清真寺", enName: "Sheikh Zayed Grand Mosque", wiki: "Sheikh_Zayed_Grand_Mosque", coords: [54.475, 24.4128], tag: "宗教聖地", season: "11月–3月（黃昏藍調時刻倒影池最美）", desc: "阿布達比耗資巨額打造的純白大理石藝術殿堂，82座圓頂、施華洛世奇水晶吊燈與世界最大手工地毯展現極致伊斯蘭工藝。" }
+        ]
+      },
+      {
+        id: "400", name: "約旦", enName: "Jordan", continent: "亞洲",
+        coords: [36.23, 30.58], popularity: 81, tier: 3,
+        attractions: [
+          { name: "佩特拉古城", enName: "Petra", wiki: "Petra", coords: [35.4444, 30.3285], tag: "世界遺產", season: "3月–5月、9月–11月（沙漠溫差適中）", desc: "納巴泰人於兩千年前直接從玫瑰色砂岩峭壁開鑿出的失落之都，穿過狹長蛇道豁然出現的卡茲尼神殿令人屏息。" },
+          { name: "瓦迪拉姆月亮谷", enName: "Wadi Rum", wiki: "Wadi_Rum", coords: [35.4194, 29.5765], tag: "自然奇景", season: "3月–5月、10月–11月（夜觀銀河星空最佳）", desc: "連綿赤紅砂丘與巨型花崗岩柱宛如火星地表，也是《沙丘》等科幻鉅片取景地，入住星空帳篷體驗貝都因沙漠文化。" }
+        ]
+      },
+      {
+        id: "682", name: "沙烏地阿拉伯", enName: "Saudi Arabia", continent: "亞洲",
+        coords: [45.07, 23.88], popularity: 73, tier: 2,
+        attractions: [
+          { name: "埃爾奧拉黑格拉", enName: "Hegra", wiki: "Hegra_(Mada'in_Salih)", coords: [37.953, 26.791], tag: "世界遺產", season: "11月–次年3月（冬季沙漠氣候極為舒適）", desc: "佩特拉的姊妹古城，百餘座保存完好的納巴泰巨石墓葬矗立於金色沙漠巨岩中，是近年全球奢華秘境旅遊的新焦點。" },
+          { name: "利雅德王國中心", enName: "Kingdom Centre", wiki: "Kingdom_Centre", coords: [46.6744, 24.7114], tag: "地標建築", season: "11月–3月（夜間觀景台視野絕佳）", desc: "頂部以巨型倒拋物線拱門聞名的利雅德摩天象徵，65公尺長的天空之橋懸掛於300公尺高空，俯瞰阿拉伯首都繁華夜景。" }
+        ]
+      },
+
+      // -------------------- 歐洲 EUROPE (17) --------------------
+      {
+        id: "250", name: "法國", enName: "France", continent: "歐洲",
+        coords: [2.21, 46.22], popularity: 100, tier: 5,
+        attractions: [
+          { name: "艾菲爾鐵塔", enName: "Eiffel Tower", wiki: "Eiffel_Tower", coords: [2.2945, 48.8584], tag: "地標建築", season: "4月–6月、9月–10月（花都微風與長日照）", desc: "1889年為世界博覽會興建的鏤空鍛鐵高塔，是巴黎永恆的浪漫徽章。整點閃爍的萬點金光與塞納河遊船交織成夢幻夜景。" },
+          { name: "羅浮宮", enName: "Louvre", wiki: "Louvre", coords: [2.3376, 48.8606], tag: "藝術殿堂", season: "全年皆宜（冬春淡季觀展較不擁擠）", desc: "世界參觀人數最多、館藏最豐厚的藝術博物館，貝聿銘設計的玻璃金字塔與《蒙娜麗莎》、《勝利女神》等人類瑰寶並列。" },
+          { name: "聖米歇爾山", enName: "Mont-Saint-Michel", wiki: "Mont-Saint-Michel", coords: [-1.5115, 48.6361], tag: "世界遺產", season: "5月–9月（大潮期間可觀海水包圍孤島奇景）", desc: "諾曼第海灣花崗岩潮汐島上的中世紀修道院城堡，漲潮時孤懸海上如天空之城，退潮則露出廣闊海沙灘塗。" }
+        ]
+      },
+      {
+        id: "380", name: "義大利", enName: "Italy", continent: "歐洲",
+        coords: [12.56, 41.87], popularity: 98, tier: 5,
+        attractions: [
+          { name: "羅馬競技場", enName: "Colosseum", wiki: "Colosseum", coords: [12.4922, 41.8902], tag: "世界遺產", season: "4月–5月、9月–10月（避開盛夏高溫與人潮）", desc: "古羅馬帝國工程與建築威儀的最高結晶，可容納五萬名觀眾的橢圓形角鬥場，至今仍令旅人感受兩千年前的帝國脈動。" },
+          { name: "威尼斯大運河", enName: "Grand Canal (Venice)", wiki: "Grand_Canal_(Venice)", coords: [12.335, 45.4375], tag: "水都奇景", season: "4月–6月、9月–10月（2月狂歡節亦極具特色）", desc: "S形蜿蜒貫穿水都威尼斯的藍色動脈，兩岸林立文藝復興與哥德式宮殿。搭乘貢多拉穿過里阿爾托橋感受水上詩意。" },
+          { name: "阿瑪菲海岸", enName: "Amalfi Coast", wiki: "Amalfi_Coast", coords: [14.6029, 40.6333], tag: "海岸秘境", season: "5月–6月、9月（陽光充足且地中海海水溫暖）", desc: "南義懸崖上的彩色村莊與檸檬梯田緊鄰深藍第勒尼安海，波西塔諾與拉維洛宛如上帝打翻調色盤的絕美海岸線。" }
+        ]
+      },
+      {
+        id: "724", name: "西班牙", enName: "Spain", continent: "歐洲",
+        coords: [-3.74, 40.46], popularity: 97, tier: 5,
+        attractions: [
+          { name: "巴塞隆納聖家堂", enName: "Sagrada Família", wiki: "Sagrada_Família", coords: [2.1744, 41.4036], tag: "世界遺產", season: "3月–5月、9月–11月（彩繪玻璃午后光影最絢麗）", desc: "建築鬼才高第傾注畢生心血的奇幻聖殿，2026年正值高第逝世百年與主塔完工里程碑，樹冠狀石柱與彩色光瀑震撼靈魂。" },
+          { name: "格拉納達阿爾罕布拉宮", enName: "Alhambra", wiki: "Alhambra", coords: [-3.5881, 37.1761], tag: "世界遺產", season: "4月–6月、9月–10月（內華達雪山背景極美）", desc: "伊比利半島最後的摩爾人伊斯蘭皇宮，獅子庭院與繁複如蕾絲的灰泥雕刻展現中世紀阿拉伯幾何美學的最高境界。" }
+        ]
+      },
+      {
+        id: "826", name: "英國", enName: "United Kingdom", continent: "歐洲",
+        coords: [-3.43, 55.37], popularity: 95, tier: 5,
+        attractions: [
+          { name: "倫敦大笨鐘與西敏宮", enName: "Big Ben", wiki: "Big_Ben", coords: [-0.1246, 51.5007], tag: "地標建築", season: "5月–9月（日照長達16小時，泰晤士河畔散步最佳）", desc: "泰晤士河畔新哥德式建築的永恆象徵，剛完成全面修復的伊莉莎白塔金飾鐘面在倫敦霧色與暮光中響起百年報時鐘聲。" },
+          { name: "巨石陣", enName: "Stonehenge", wiki: "Stonehenge", coords: [-1.8262, 51.1789], tag: "世界遺產", season: "6月夏至或春秋晴朗午後", desc: "索爾茲伯里平原上擁有五千年歷史的史前巨石環陣，精密對應夏至日出方位，其建造與搬運之謎至今仍是人類學最大謎團。" },
+          { name: "愛丁堡城堡", enName: "Edinburgh Castle", wiki: "Edinburgh_Castle", coords: [-3.1999, 55.9486], tag: "文化古蹟", season: "7月–8月（愛丁堡軍樂節與藝術節盛會）", desc: "盤踞於死火山玄武岩絕壁上的蘇格蘭王室堡壘，俯瞰整座中世紀老城與皇家一英里大道，見證蘇格蘭千年風雲歷史。" }
+        ]
+      },
+      {
+        id: "276", name: "德國", enName: "Germany", continent: "歐洲",
+        coords: [10.45, 51.16], popularity: 90, tier: 4,
+        attractions: [
+          { name: "新天鵝堡", enName: "Neuschwanstein Castle", wiki: "Neuschwanstein_Castle", coords: [10.7498, 47.5576], tag: "夢幻古堡", season: "5月–10月（綠意盎然或秋楓），12月–2月（童話雪景）", desc: "巴伐利亞國王路德維希二世在阿爾卑斯山麓建造的浪漫主義白堊城堡，瑪麗安橋上遠望如同迪士尼睡美人城堡現身人間。" },
+          { name: "布蘭登堡門", enName: "Brandenburg Gate", wiki: "Brandenburg_Gate", coords: [13.3777, 52.5163], tag: "歷史名勝", season: "5月–9月、12月（聖誕市集氛圍濃厚）", desc: "柏林新古典主義凱旋門與德國統一的時代象徵，見證冷戰柏林圍牆倒塌與歐洲重歸和平的關鍵歷史現場。" }
+        ]
+      },
+      {
+        id: "756", name: "瑞士", enName: "Switzerland", continent: "歐洲",
+        coords: [8.22, 46.81], popularity: 94, tier: 5,
+        attractions: [
+          { name: "馬特洪峰", enName: "Matterhorn", wiki: "Matterhorn", coords: [7.6585, 45.9766], tag: "自然奇景", season: "6月–9月（高山湖健行倒影）；12月–3月（頂級滑雪季）", desc: "策馬特小鎮盡頭如金字塔般銳利挺拔的阿爾卑斯山魂，利菲爾湖清晨完美倒映金色日照金山的「黃金馬特洪峰」絕景。" },
+          { name: "少女峰", enName: "Jungfrau", wiki: "Jungfrau", coords: [7.9625, 46.5368], tag: "世界遺產", season: "全年皆宜（夏季山花草原、冬季冰原雪道）", desc: "搭乘百年齒軌鐵路登上歐洲屋脊Jungfraujoch，置身阿萊奇冰川與萬年冰宮之中，將伯恩高地的壯闊雪山盡收眼底。" }
+        ]
+      },
+      {
+        id: "040", name: "奧地利", enName: "Austria", continent: "歐洲",
+        coords: [14.55, 47.51], popularity: 87, tier: 4,
+        attractions: [
+          { name: "哈爾施塔特", enName: "Hallstatt", wiki: "Hallstatt", coords: [13.6493, 47.5622], tag: "世界遺產", season: "5月–10月（湖畔木屋倒影如明信片）", desc: "阿爾卑斯山與冰川湖泊狹縫間的千年鹽礦童話小鎮，尖頂教堂與彩色木屋依山傍水，被譽為世界最美湖濱聚落。" },
+          { name: "維也納美泉宮", enName: "Schönbrunn Palace", wiki: "Schönbrunn_Palace", coords: [16.3122, 48.1845], tag: "世界遺產", season: "4月–9月（法式巴洛克花園百花齊放）", desc: "哈布斯堡王朝皇室夏宮，鵝黃色巴洛克宮殿擁有一千四百餘間廳室，莫札特六歲時曾在此為女皇瑪麗亞·特蕾莎獻藝。" }
+        ]
+      },
+      {
+        id: "528", name: "荷蘭", enName: "Netherlands", continent: "歐洲",
+        coords: [5.29, 52.13], popularity: 86, tier: 4,
+        attractions: [
+          { name: "阿姆斯特丹運河帶", enName: "Canals of Amsterdam", wiki: "Canals_of_Amsterdam", coords: [4.8952, 52.3702], tag: "世界遺產", season: "4月–9月（單車騎行與運河遊船黃金季節）", desc: "17世紀黃金時代規劃的同心圓環狀運河網，上千座橋樑與山形牆山牆屋宇勾勒出自由奔放的北方威尼斯風貌。" },
+          { name: "庫肯霍夫鬱金香公園", enName: "Keukenhof", wiki: "Keukenhof", coords: [4.5464, 52.2712], tag: "春季限定", season: "3月下旬–5月中旬（每年僅開園約八週的花季盛典）", desc: "每年春天綻放七百萬株鬱金香、風信子與水仙的「歐洲花園」，繽紛花毯沿著風車與林蔭溪流延伸，美不勝收。" }
+        ]
+      },
+      {
+        id: "300", name: "希臘", enName: "Greece", continent: "歐洲",
+        coords: [21.82, 39.07], popularity: 93, tier: 5,
+        attractions: [
+          { name: "雅典衛城", enName: "Acropolis of Athens", wiki: "Acropolis_of_Athens", coords: [23.7257, 37.9715], tag: "世界遺產", season: "4月–6月、9月–10月（氣候溫和且陽光金黃）", desc: "西方文明與民主制度的搖籃，帕德嫩神廟以完美黃金比例多立克柱式矗立山巔，見證古希臘黃金時代的輝煌。" },
+          { name: "聖托里尼", enName: "Santorini", wiki: "Santorini", coords: [25.4615, 36.3932], tag: "海島度假", season: "5月–6月、9月–10月（避開8月人潮與強風）", desc: "火山口斷崖上堆疊著純白屋舍與藍頂教堂，伊亞小鎮夕陽沉入愛琴海的絕美暮色，是全球蜜月與攝影的夢幻代名詞。" }
+        ]
+      },
+      {
+        id: "620", name: "葡萄牙", enName: "Portugal", continent: "歐洲",
+        coords: [-8.22, 39.39], popularity: 88, tier: 4,
+        attractions: [
+          { name: "里斯本貝倫塔", enName: "Belém Tower", wiki: "Belém_Tower", coords: [-9.216, 38.6916], tag: "世界遺產", season: "4月–6月、9月–10月（大西洋微風最宜人）", desc: "太加斯河口的曼努埃爾式石灰岩堡壘，象徵16世紀大航海時代葡萄牙船隊啟航探索世界起點，雕刻融入航海纜繩圖騰。" },
+          { name: "辛特拉佩納宮", enName: "Pena Palace", wiki: "Pena_Palace", coords: [-9.3906, 38.7876], tag: "夢幻古堡", season: "4月–10月（晨間雲霧散去時色彩最耀眼）", desc: "矗立於辛特拉山雲霧中的鮮黃與赤紅童話宮殿，融合哥德、摩爾與文藝復興風格，從露台可遠眺大西洋海岸。" }
+        ]
+      },
+      {
+        id: "203", name: "捷克", enName: "Czechia", continent: "歐洲",
+        coords: [15.47, 49.81], popularity: 84, tier: 3,
+        attractions: [
+          { name: "布拉格查理大橋", enName: "Charles Bridge", wiki: "Charles_Bridge", coords: [14.4114, 50.0865], tag: "歷史名勝", season: "5月–6月、9月–10月（清晨薄霧最具魔幻氣息）", desc: "跨越伏爾塔瓦河的14世紀哥德式石橋，橋欄兩側矗立30尊巴洛克聖人雕像，街頭藝術家與金色晨光交織波希米亞詩意。" },
+          { name: "布拉格城堡", enName: "Prague Castle", wiki: "Prague_Castle", coords: [14.4005, 50.0911], tag: "世界遺產", season: "4月–10月（黃金巷與聖維特主教座堂必訪）", desc: "世界面積最大的古城堡建築群，核心聖維特主教座堂以哥德飛扶壁與慕夏彩繪玻璃聞名，俯瞰布拉格百塔紅瓦屋頂。" }
+        ]
+      },
+      {
+        id: "578", name: "挪威", enName: "Norway", continent: "歐洲",
+        coords: [8.46, 60.47], popularity: 86, tier: 4,
+        attractions: [
+          { name: "蓋朗厄爾峽灣", enName: "Geirangerfjord", wiki: "Geirangerfjord", coords: [7.0942, 62.1008], tag: "世界遺產", season: "6月–8月（夏季融雪使七姊妹瀑布水量最豐沛）", desc: "深度切入斯堪地那維亞山脈的藍寶石峽灣，千米絕壁飛瀑直落碧水，搭郵輪航行其中如穿越北歐神話畫廊。" },
+          { name: "羅弗敦群島", enName: "Lofoten", wiki: "Lofoten", coords: [13.61, 68.2], tag: "極光秘境", season: "9月–3月（極光）；6月–7月（永晝午夜太陽）", desc: "北極圈內鋸齒狀花崗岩峰群拔海而起，紅色漁夫木屋Rorbuer點綴冷冽海灣，兼具極光攝影與維京文化魅力。" }
+        ]
+      },
+      {
+        id: "352", name: "冰島", enName: "Iceland", continent: "歐洲",
+        coords: [-19.02, 64.96], popularity: 83, tier: 3,
+        attractions: [
+          { name: "藍湖地熱溫泉", enName: "Blue Lagoon (geothermal spa)", wiki: "Blue_Lagoon_(geothermal_spa)", coords: [-22.4495, 63.8804], tag: "地熱奇景", season: "全年皆宜（冬季雪花飄落泡湯體驗最夢幻）", desc: "黑色火山熔岩原環抱的乳藍色富含矽泥地熱潟湖，終年保持溫暖蒸騰白霧，為冰與火之國最具代表性的療癒聖地。" },
+          { name: "黃金瀑布", enName: "Gullfoss", wiki: "Gullfoss", coords: [-20.1199, 64.3271], tag: "自然奇景", season: "6月–8月（彩虹水霧）；1月–3月（冰封瀑布奇觀）", desc: "冰島黃金圈最壯麗的雙層斷層瀑布，寬闊冰川融水轟然墜入70公尺深邃峽谷，陽光照射時常現跨谷雙道彩虹。" }
+        ]
+      },
+      {
+        id: "246", name: "芬蘭", enName: "Finland", continent: "歐洲",
+        coords: [25.74, 61.92], popularity: 79, tier: 3,
+        attractions: [
+          { name: "羅瓦涅米聖誕老人村", enName: "Santa Claus Village", wiki: "Santa_Claus_Village", coords: [25.8472, 66.5436], tag: "極地文化", season: "11月–次年3月（白雪皚皚、北極光與哈士奇雪橇）", desc: "位於北極圈線上的官方聖誕老人故鄉，可跨越北緯66°33′標線並寄出蓋有北極圈郵戳的明信片，夜宿玻璃極光屋。" },
+          { name: "芬蘭城堡", enName: "Suomenlinna", wiki: "Suomenlinna", coords: [24.9881, 60.1455], tag: "世界遺產", season: "5月–9月（波羅的海島嶼野餐與歷史散策）", desc: "建於赫爾辛基外海六座島嶼上的18世紀星形海上要塞，百年花崗岩城牆與燈塔見證瑞典、俄國與芬蘭的歷史變遷。" }
+        ]
+      },
+      {
+        id: "752", name: "瑞典", enName: "Sweden", continent: "歐洲",
+        coords: [18.64, 60.12], popularity: 77, tier: 3,
+        attractions: [
+          { name: "斯德哥爾摩老城", enName: "Gamla stan", wiki: "Gamla_stan", coords: [18.0717, 59.3251], tag: "歷史街區", season: "5月–9月（北歐仲夏陽光燦爛，群島渡輪暢行）", desc: "建於小島之上的13世紀中世紀古城，鵝卵石窄巷與大廣場赤黃色山牆建築保存完好，兼具諾貝爾博物館與皇宮風華。" },
+          { name: "瓦薩沉船博物館", enName: "Vasa Museum", wiki: "Vasa_Museum", coords: [18.0914, 59.328], tag: "文化博物館", season: "全年皆宜（室內恆溫展覽不受天候影響）", desc: "完整展出1628年首航即沉沒、於海底沉睡333年後打撈重見天日的17世紀皇家戰艦，高達52公尺木構艦身雕飾震撼人心。" }
+        ]
+      },
+      {
+        id: "191", name: "克羅埃西亞", enName: "Croatia", continent: "歐洲",
+        coords: [15.2, 45.1], popularity: 83, tier: 3,
+        attractions: [
+          { name: "杜布羅夫尼克古城", enName: "Dubrovnik", wiki: "Dubrovnik", coords: [18.0944, 42.6507], tag: "世界遺產", season: "5月–6月、9月–10月（亞得里亞海湛藍晴朗）", desc: "被稱為「亞得里亞海明珠」的石砌城牆海港，橘紅屋瓦與清澈海水令《冰與火之歌》選為君臨城實景拍攝地。" },
+          { name: "十六湖國家公園", enName: "Plitvice Lakes National Park", wiki: "Plitvice_Lakes_National_Park", coords: [15.582, 44.8654], tag: "世界遺產", season: "5月–6月（翠綠水瀑）、10月（秋林倒映翡翠湖面）", desc: "東南歐最古老的國家公園，石灰華屏障將16座梯田狀湖泊串連成百道瀑布，木棧道貼水蜿蜒如九寨溝歐洲版。" }
+        ]
+      },
+      {
+        id: "616", name: "波蘭", enName: "Poland", continent: "歐洲",
+        coords: [19.14, 51.91], popularity: 74, tier: 2,
+        attractions: [
+          { name: "克拉科夫歷史中心", enName: "Kraków Old Town", wiki: "Kraków_Old_Town", coords: [19.9372, 50.0619], tag: "世界遺產", season: "5月–9月（中央集市廣場咖啡文化迷人）", desc: "躲過二戰摧毀的中歐古都心臟，擁有歐洲最大的中世紀中央集市廣場、紡織會館與瓦維爾皇家城堡，文藝氣息濃厚。" },
+          { name: "維利奇卡鹽礦", enName: "Wieliczka Salt Mine", wiki: "Wieliczka_Salt_Mine", coords: [20.0558, 49.9833], tag: "世界遺產", season: "全年皆宜（地下恆溫約14°C，極為舒適）", desc: "自13世紀開採至今的地下九層鹽礦迷宮，礦工在深達百餘公尺的地底用岩鹽雕刻出宏偉的聖金加教堂與水晶鹽燈。" }
+        ]
+      },
+
+      // -------------------- 北美洲 NORTH AMERICA (6) --------------------
+      {
+        id: "840", name: "美國", enName: "United States", continent: "北美洲",
+        coords: [-95.71, 37.09], popularity: 98, tier: 5,
+        attractions: [
+          { name: "大峽谷國家公園", enName: "Grand Canyon", wiki: "Grand_Canyon", coords: [-112.1129, 36.1069], tag: "世界遺產", season: "4月–6月、9月–10月（南緣氣候溫和、日落層次豐富）", desc: "科羅拉多河耗費數百萬年切穿二十億年地球岩層的超級峽谷，長達446公里的赤紅岩壁在日出日落時燃燒般變幻色彩。" },
+          { name: "自由女神像", enName: "Statue of Liberty", wiki: "Statue_of_Liberty", coords: [-74.0445, 40.6892], tag: "地標建築", season: "5月–6月、9月–10月（曼哈頓海風清爽）", desc: "法國贈予美國的自由與希望象徵，高舉火炬屹立於紐約港自由島，背景映襯曼哈頓下城摩天叢林。" },
+          { name: "黃石國家公園", enName: "Yellowstone National Park", wiki: "Yellowstone_National_Park", coords: [-110.5885, 44.428], tag: "自然奇景", season: "6月–9月（全區道路開放，大稜鏡溫泉色彩最鮮豔）", desc: "世界上第一座國家公園，匯聚老忠實間歇泉、七彩大稜鏡溫泉、火山峽谷與美洲野牛群，宛如地球地熱實驗室。" }
+        ]
+      },
+      {
+        id: "124", name: "加拿大", enName: "Canada", continent: "北美洲",
+        coords: [-106.34, 56.13], popularity: 91, tier: 4,
+        attractions: [
+          { name: "班夫國家公園", enName: "Banff National Park", wiki: "Banff_National_Park", coords: [-115.5708, 51.4968], tag: "自然奇景", season: "6月–9月（露易絲湖融冰呈蒂芬妮藍）；12月–3月（滑雪）", desc: "加拿大洛磯山脈的心臟，露易絲湖與夢蓮湖如鑲嵌在萬年冰川雪峰之間的翡翠寶石，冰原大道被譽為世界最美公路。" },
+          { name: "尼亞加拉大瀑布", enName: "Niagara Falls", wiki: "Niagara_Falls", coords: [-79.0742, 43.0828], tag: "自然奇景", season: "5月–9月（乘霧中少女號船隻近距離感受磅礴水氣）", desc: "橫跨美加邊界的北美洲流量最大瀑布群，馬蹄瀑布雷霆萬鈞的白色水幕與夜間彩色燈光秀展現大自然的原始力量。" },
+          { name: "老魁北克城", enName: "Old Quebec", wiki: "Old_Quebec", coords: [-71.208, 46.8139], tag: "世界遺產", season: "9月–10月（楓葉大道）；12月–2月（浪漫雪國）", desc: "北美唯一保留完整古城牆的法語歷史名城，芳堤娜城堡飯店俯瞰聖勞倫斯河，宛如穿越回17世紀的法蘭西小鎮。" }
+        ]
+      },
+      {
+        id: "484", name: "墨西哥", enName: "Mexico", continent: "北美洲",
+        coords: [-102.55, 23.63], popularity: 89, tier: 4,
+        attractions: [
+          { name: "奇琴伊察", enName: "Chichen Itza", wiki: "Chichen_Itza", coords: [-88.5678, 20.6843], tag: "世界遺產", season: "11月–次年4月（猶加敦半島乾季涼爽）", desc: "瑪雅文明最輝煌的古城遺址，庫庫爾坎羽蛇神金字塔蘊含精準天文曆法，春秋分時階梯投射出羽蛇神降臨的光影奇觀。" },
+          { name: "特奧蒂瓦坎", enName: "Teotihuacan", wiki: "Teotihuacan", coords: [-98.8435, 19.6925], tag: "世界遺產", season: "11月–4月（清晨搭熱氣球俯瞰亡靈大道與雙金字塔）", desc: "墨西哥城東北方神秘的前哥倫布時期巨城「眾神之城」，太陽金字塔與月亮金字塔巍峨聳立於高原盆地之上。" }
+        ]
+      },
+      {
+        id: "188", name: "哥斯大黎加", enName: "Costa Rica", continent: "北美洲",
+        coords: [-83.75, 9.74], popularity: 74, tier: 2,
+        attractions: [
+          { name: "阿雷納爾火山", enName: "Arenal Volcano", wiki: "Arenal_Volcano", coords: [-84.7032, 10.4626], tag: "火山溫泉", season: "12月–4月（乾季雲霧較少，完美圓錐火山清晰可見）", desc: "中美洲最具標誌性的圓錐形活火山，周邊擁有熱帶雨林吊橋、瀑布與天然地熱溫泉，展現純淨的生態永續精神。" },
+          { name: "蒙特維多雲霧森林", enName: "Monteverde Cloud Forest Reserve", wiki: "Monteverde_Cloud_Forest_Reserve", coords: [-84.7916, 10.302], tag: "生態奇觀", season: "12月–4月（尋訪夢幻鳳尾綠咬鵑的最佳季節）", desc: "終年被太平洋與加勒比海濕潤雲霧環繞的高山森林保護區，樹冠吊橋與樹懶、蜂鳥構成地球生物多樣性寶庫。" }
+        ]
+      },
+      {
+        id: "192", name: "古巴", enName: "Cuba", continent: "北美洲",
+        coords: [-77.78, 21.52], popularity: 71, tier: 2,
+        attractions: [
+          { name: "哈瓦那舊城", enName: "Old Havana", wiki: "Old_Havana", coords: [-82.359, 23.1367], tag: "世界遺產", season: "11月–次年4月（陽光溫暖乾爽，避開颶風季）", desc: "時光彷彿凝結於1950年代的加勒比海傳奇城市，斑駁卻色彩鮮豔的西班牙殖民建築、復古雪佛蘭敞篷車與騷莎樂聲交織。" },
+          { name: "巴拉德羅海灘", enName: "Varadero", wiki: "Varadero", coords: [-81.2444, 23.1536], tag: "海島度假", season: "12月–4月（海水清澈見底、海風舒爽）", desc: "綿延20公里的白沙半島伸入漸層藍綠加勒比海，細軟白沙與全包式海濱渡假風情使其名列世界十大最美海灘。" }
+        ]
+      },
+      {
+        id: "214", name: "多明尼加", enName: "Dominican Republic", continent: "北美洲",
+        coords: [-70.16, 18.73], popularity: 70, tier: 2,
+        attractions: [
+          { name: "蓬塔卡納", enName: "Punta Cana", wiki: "Punta_Cana", coords: [-68.3725, 18.5601], tag: "海島度假", season: "12月–4月（晴朗無雨，加勒比海最美季節）", desc: "加勒比海與大西洋交會處的椰林白沙渡假勝地，超過30公里的純白珊瑚沙灘與碧綠潟湖為北美與歐洲旅人避寒首選。" },
+          { name: "聖多明哥殖民城", enName: "Ciudad Colonial (Santo Domingo)", wiki: "Ciudad_Colonial_(Santo_Domingo)", coords: [-69.884, 18.4728], tag: "世界遺產", season: "12月–4月（漫步美洲最古石板街）", desc: "歐洲人在美洲建立的第一座永久城市，保存著美洲最古老的大教堂、城堡與哥倫布家族宮殿，歷史地位無可取代。" }
+        ]
+      },
+
+      // -------------------- 南美洲 SOUTH AMERICA (6) --------------------
+      {
+        id: "604", name: "秘魯", enName: "Peru", continent: "南美洲",
+        coords: [-75.01, -9.18], popularity: 91, tier: 4,
+        attractions: [
+          { name: "馬丘比丘", enName: "Machu Picchu", wiki: "Machu_Picchu", coords: [-72.545, -13.1631], tag: "世界遺產", season: "5月–9月（安地斯山旱季，晨霧散開時天晴機率最高）", desc: "隱身於海拔2,430公尺安地斯山脊雲霧中的印加帝國失落天空之城，精密無灰泥石牆與梯田奇蹟名列世界新七大奇景。" },
+          { name: "庫斯科彩虹山", enName: "Vinicunca", wiki: "Vinicunca", coords: [-71.303, -13.869], tag: "地質奇觀", season: "5月–9月（乾季無雪覆蓋，七彩礦物條紋最清晰）", desc: "海拔5,200公尺的丹霞沉積岩山脈，因數百萬年礦物質沉積呈現如彩虹般絢麗的紅、金、綠條紋地貌。" },
+          { name: "納斯卡線", enName: "Nazca Lines", wiki: "Nazca_Lines", coords: [-75.13, -14.739], tag: "世界遺產", season: "全年皆宜（早晨氣流最平穩，適合搭小飛機俯瞰）", desc: "兩千年前納斯卡文明於乾燥沙漠高原繪製的巨型蜂鳥、蜘蛛與幾何線條地畫，必須升空方能一窺全貌的史前之謎。" }
+        ]
+      },
+      {
+        id: "076", name: "巴西", enName: "Brazil", continent: "南美洲",
+        coords: [-51.92, -14.23], popularity: 84, tier: 3,
+        attractions: [
+          { name: "里約熱內盧基督像", enName: "Christ the Redeemer (statue)", wiki: "Christ_the_Redeemer_(statue)", coords: [-43.2105, -22.9519], tag: "地標建築", season: "5月–9月（涼爽晴朗）；2月（里約狂歡節熱力四射）", desc: "張開雙臂佇立於科科瓦多山頂的30公尺高裝飾藝術雕像，俯瞰麵包山、瓜納巴拉灣與柯帕卡巴納海灘的絕世海灣。" },
+          { name: "伊瓜蘇瀑布", enName: "Iguazu Falls", wiki: "Iguazu_Falls", coords: [-54.4367, -25.6953], tag: "世界遺產", season: "3月–5月、8月–10月（氣候適中，水霧彩虹壯麗）", desc: "由275道瀑布組成的世界最寬馬蹄形瀑布群，橫跨巴西與阿根廷雨林邊界，「魔鬼咽喉」的奔騰水勢震耳欲聾。" }
+        ]
+      },
+      {
+        id: "032", name: "阿根廷", enName: "Argentina", continent: "南美洲",
+        coords: [-63.61, -38.41], popularity: 82, tier: 3,
+        attractions: [
+          { name: "佩里托莫雷諾冰川", enName: "Perito Moreno Glacier", wiki: "Perito_Moreno_Glacier", coords: [-73.0498, -50.4957], tag: "世界遺產", season: "11月–次年3月（南半球夏秋，日照長且氣候較溫和）", desc: "巴塔哥尼亞冰原少數仍在緩慢推進的巨型冰川，高達70公尺的湛藍冰牆不時崩裂墜入阿根廷湖，發出雷鳴巨響。" },
+          { name: "布宜諾斯艾利斯博卡區", enName: "La Boca", wiki: "La_Boca", coords: [-58.3627, -34.6345], tag: "文化街區", season: "3月–5月、9月–11月（南半球春秋百花盛開）", desc: "探戈舞的發源地與色彩最狂放的港邊藝術街區，鐵皮木屋漆上鮮豔藍黃紅紫，街頭隨時可見舞者伴隨手風琴翩翩起舞。" }
+        ]
+      },
+      {
+        id: "152", name: "智利", enName: "Chile", continent: "南美洲",
+        coords: [-71.54, -35.67], popularity: 80, tier: 3,
+        attractions: [
+          { name: "百內國家公園", enName: "Torres del Paine National Park", wiki: "Torres_del_Paine_National_Park", coords: [-73.0, -50.9423], tag: "自然奇景", season: "11月–次年3月（南半球夏季W線與O線健行季節）", desc: "南美巴塔哥尼亞最震撼的花崗岩角峰與冰川湖泊殿堂，清晨日出染紅三座百內塔尖時，堪稱地球盡頭最純粹的荒野史詩。" },
+          { name: "復活節島摩艾石像", enName: "Easter Island", wiki: "Easter_Island", coords: [-109.3497, -27.1127], tag: "世界遺產", season: "10月–4月（太平洋風浪較小、天氣晴朗）", desc: "孤懸東南太平洋波利尼西亞三角頂點的神秘島嶼，近千尊巨大火山岩摩艾石像凝望大海，守護拉帕努伊古老傳說。" }
+        ]
+      },
+      {
+        id: "068", name: "玻利維亞", enName: "Bolivia", continent: "南美洲",
+        coords: [-63.58, -16.29], popularity: 74, tier: 2,
+        attractions: [
+          { name: "烏尤尼鹽沼（天空之鏡）", enName: "Salar de Uyuni", wiki: "Salar_de_Uyuni", coords: [-67.4891, -20.1338], tag: "自然奇景", season: "12月–3月（雨季積水倒映天空）；5月–10月（乾季六角鹽磚）", desc: "世界面積最大的萬平方公里高海拔鹽漠，雨季薄水覆蓋表面化為無邊際鏡面，白天藍天白雲、夜裡銀河倒映腳下。" },
+          { name: "拉巴斯月亮谷", enName: "Valle de la Luna (Bolivia)", wiki: "Valle_de_la_Luna_(Bolivia)", coords: [-68.094, -16.567], tag: "地質奇觀", season: "5月–10月（旱季晴空萬里）", desc: "高海拔都市拉巴斯南郊經風雨侵蝕數萬年形成的粘土與砂岩尖塔迷宮，阿姆斯壯曾驚嘆其地貌宛如月球表面。" }
+        ]
+      },
+      {
+        id: "218", name: "厄瓜多", enName: "Ecuador", continent: "南美洲",
+        coords: [-78.18, -1.83], popularity: 72, tier: 2,
+        attractions: [
+          { name: "加拉巴哥群島", enName: "Galápagos Islands", wiki: "Galápagos_Islands", coords: [-90.9656, -0.9538], tag: "世界遺產", season: "全年皆宜（12月–5月水溫較暖、海面平靜）", desc: "啟發達爾文提出《物種起源》進化論的活體生態博物館，海鬣蜥、藍腳鰹鳥、象龜與海獅完全不怕人類，近距離共存。" },
+          { name: "基多老城", enName: "Quito", wiki: "Quito", coords: [-78.5123, -0.2201], tag: "世界遺產", season: "6月–9月（安地斯山赤道旱季最晴朗）", desc: "世界海拔第二高的首都與首批登錄世界文化遺產的古城，群山火山環抱著鍍金巴洛克教堂與西班牙殖民廣場。" }
+        ]
+      },
+
+      // -------------------- 非洲 AFRICA (8) --------------------
+      {
+        id: "818", name: "埃及", enName: "Egypt", continent: "非洲",
+        coords: [30.8, 26.82], popularity: 91, tier: 4,
+        attractions: [
+          { name: "吉薩金字塔群", enName: "Giza pyramid complex", wiki: "Giza_pyramid_complex", coords: [31.1342, 29.9792], tag: "世界遺產", season: "10月–次年4月（涼爽不酷熱，大埃及博物館同步朝聖）", desc: "古代世界七大奇蹟唯一留存至今的古夫金字塔與人面獅身像，歷經四千五百年風沙仍傲視尼羅河三角洲。" },
+          { name: "阿布辛貝神廟", enName: "Abu Simbel", wiki: "Abu_Simbel", coords: [31.6258, 22.3372], tag: "世界遺產", season: "10月–3月（2月與10月22日可觀太陽節日光直射聖殿奇觀）", desc: "拉美西斯二世於納賽爾湖畔鑿山而建的巨岩神廟，四尊20公尺高法老坐像為避水壩淹沒而整座切割遷移，堪稱現代工程奇蹟。" },
+          { name: "帝王谷", enName: "Valley of the Kings", wiki: "Valley_of_the_Kings", coords: [32.6014, 25.7402], tag: "考古聖地", season: "11月–3月（盧克索氣候溫和宜人）", desc: "新王國時期法老長眠的隱密沙漠峽谷，圖坦卡門與塞提一世陵墓壁畫色澤歷經三千年依然鮮豔如初。" }
+        ]
+      },
+      {
+        id: "504", name: "摩洛哥", enName: "Morocco", continent: "非洲",
+        coords: [-7.09, 31.79], popularity: 84, tier: 3,
+        attractions: [
+          { name: "舍夫沙萬藍色山城", enName: "Chefchaouen", wiki: "Chefchaouen", coords: [-5.2684, 35.1688], tag: "人文秘境", season: "3月–5月、9月–11月（里夫山區光影柔和舒爽）", desc: "隱身北非里夫山脈的夢幻藍調小鎮，層層階梯與牆面漆滿天空藍與鈷藍色調，漫步其中宛如走進地中海藍色夢境。" },
+          { name: "馬拉喀什德吉瑪廣場", enName: "Jemaa el-Fnaa", wiki: "Jemaa_el-Fnaa", coords: [-7.9891, 31.6258], tag: "世界遺產", season: "3月–5月、10月–11月（夜幕降臨燈火與香氣四溢）", desc: "北非最熱鬧的露天市集與非物質文化遺產廣場，日落後數百個炭烤攤位、說書人、柏柏爾鼓樂與香料煙霧沸騰整座紅城。" },
+          { name: "撒哈拉梅爾祖卡沙丘", enName: "Merzouga", wiki: "Merzouga", coords: [-4.0134, 31.0802], tag: "沙漠探險", season: "10月–次年4月（避開夏季酷暑，騎駱駝賞沙海銀河）", desc: "高達150公尺的爾格切比金色新月沙丘群，晨昏時分沙脊呈現深紅與琥珀光影，夜宿豪華沙漠營地仰望無光害璀璨星海。" }
+        ]
+      },
+      {
+        id: "710", name: "南非", enName: "South Africa", continent: "非洲",
+        coords: [22.93, -30.55], popularity: 82, tier: 3,
+        attractions: [
+          { name: "開普敦桌山", enName: "Table Mountain", wiki: "Table_Mountain", coords: [18.4098, -33.9628], tag: "自然奇景", season: "11月–次年3月（南半球夏季晴朗，桌布雲奇景常見）", desc: "頂部平坦如巨型餐桌的千年砂岩山脈，搭乘360度旋轉纜車登頂可同時俯瞰大西洋、印度洋交會海灣與繁華開普敦。" },
+          { name: "克魯格國家公園", enName: "Kruger National Park", wiki: "Kruger_National_Park", coords: [31.5547, -23.9884], tag: "野生獵遊", season: "5月–9月（乾季草木稀疏，最易追蹤非洲五霸動物）", desc: "非洲規模最大且設施最完善的野生動物保護區之一，乘越野車追蹤獅子、非洲象、花豹、犀牛與水牛五大巨獸。" }
+        ]
+      },
+      {
+        id: "404", name: "肯亞", enName: "Kenya", continent: "非洲",
+        coords: [37.9, -0.02], popularity: 79, tier: 3,
+        attractions: [
+          { name: "馬賽馬拉國家保護區", enName: "Maasai Mara", wiki: "Maasai_Mara", coords: [35.1439, -1.4061], tag: "動物大遷徙", season: "7月–10月（百萬角馬渡馬拉河天河之渡震撼季節）", desc: "地球上最壯觀的生命奇蹟舞台，每年數百萬頭牛羚與斑馬冒險橫渡鱷魚潛伏的馬拉河，草原上獅群與獵豹如影隨形。" },
+          { name: "安博塞利國家公園", enName: "Amboseli National Park", wiki: "Amboseli_National_Park", coords: [37.2606, -2.6527], tag: "自然奇景", season: "6月–10月、1月–2月（吉力馬札羅雪峰晨間最清晰）", desc: "拍攝「非洲大象群漫步在最高峰吉力馬札羅山雪頂之下」經典曠野大片的唯一聖地，生態攝影師終極夢想。" }
+        ]
+      },
+      {
+        id: "834", name: "坦尚尼亞", enName: "Tanzania", continent: "非洲",
+        coords: [34.88, -6.36], popularity: 81, tier: 3,
+        attractions: [
+          { name: "塞倫蓋蒂國家公園", enName: "Serengeti National Park", wiki: "Serengeti_National_Park", coords: [34.8333, -2.3333], tag: "世界遺產", season: "1月–3月（產子季）、6月–7月（西部走廊遷徙）", desc: "馬賽語意為「無盡的平原」，金黃稀樹草原一望無際，清晨搭熱氣球升空俯瞰長頸鹿與象群剪影令人終生難忘。" },
+          { name: "吉力馬札羅山", enName: "Mount Kilimanjaro", wiki: "Mount_Kilimanjaro", coords: [37.3556, -3.0674], tag: "極限攀登", season: "1月–3月、7月–10月（赤道雪峰天氣最穩定）", desc: "海拔5,895公尺的非洲最高峰與世界最高獨立火山，無需專業攀冰技術即可從熱帶雨林一路健行至赤道冰川之巔。" }
+        ]
+      },
+      {
+        id: "516", name: "納米比亞", enName: "Namibia", continent: "非洲",
+        coords: [18.49, -22.95], popularity: 73, tier: 2,
+        attractions: [
+          { name: "蘇絲斯黎紅沙漠", enName: "Sossusvlei", wiki: "Sossusvlei", coords: [15.2916, -24.7274], tag: "自然奇景", season: "5月–10月（涼爽乾季，45號沙丘日出陰陽分界絕美）", desc: "納米比沙漠深處高達300公尺的鐵鏽紅沙丘與死亡谷千年枯樹剪影，陽光斜照下構成超現實主義油畫般的幾何世界。" },
+          { name: "埃托沙國家公園", enName: "Etosha National Park", wiki: "Etosha_National_Park", coords: [16.3293, -18.8556], tag: "野生獵遊", season: "6月–10月（旱季動物齊聚白色鹽沼水坑飲水）", desc: "以廣袤銀白鹽盤為中心的高冷野生動物王國，自駕或入住水坑旁營地即可靜候大象、黑犀牛與長頸鹿群現身。" }
+        ]
+      },
+      {
+        id: "450", name: "馬達加斯加", enName: "Madagascar", continent: "非洲",
+        coords: [46.86, -18.76], popularity: 64, tier: 1,
+        attractions: [
+          { name: "猴麵包樹大道", enName: "Avenue of the Baobabs", wiki: "Avenue_of_the_Baobabs", coords: [44.4184, -20.2508], tag: "自然奇景", season: "4月–11月（旱季道路暢通、夕陽橘紅剪影最動人）", desc: "穆龍達瓦土路兩旁矗立數十棵逾800年樹齡的巨型猴麵包樹，粗壯樹幹與傘狀樹冠在日落餘暉下宛如外星星球。" },
+          { name: "石林國家公園", enName: "Tsingy de Bemaraha National Park", wiki: "Tsingy_de_Bemaraha_National_Park", coords: [44.7833, -18.6667], tag: "世界遺產", season: "6月–11月（旱季開放懸索吊橋與喀斯特探險）", desc: "數百萬年雨水溶蝕石灰岩形成的刀鋒狀灰色喀斯特尖塔森林，狐猴在百米石柱間敏捷跳躍，是地球最奇特地形之一。" }
+        ]
+      },
+      {
+        id: "788", name: "突尼西亞", enName: "Tunisia", continent: "非洲",
+        coords: [9.53, 33.88], popularity: 69, tier: 2,
+        attractions: [
+          { name: "埃爾傑姆圓形劇場", enName: "Amphitheatre of El Jem", wiki: "Amphitheatre_of_El_Jem", coords: [10.7069, 35.2964], tag: "世界遺產", season: "3月–5月、10月–11月（北非地中海氣候和煦）", desc: "非洲保存最完整、世界第三大的古羅馬圓形角鬥場，可容納三萬五千名觀眾，金色石拱廊展現古羅馬北非行省的鼎盛榮光。" },
+          { name: "西迪布賽義德藍白小鎮", enName: "Sidi Bou Said", wiki: "Sidi_Bou_Said", coords: [10.3472, 36.8686], tag: "海岸秘境", season: "4月–6月、9月–10月（九重葛盛開映襯藍門白牆）", desc: "俯瞰突尼斯灣的懸崖藝術村落，純白屋舍搭配雕花鐵窗與寶藍色木門，洋溢融合阿拉伯風情的地中海浪漫。" }
+        ]
+      },
+      {
+        id: "894", name: "尚比亞", enName: "Zambia", continent: "非洲",
+        coords: [27.84, -13.13], popularity: 63, tier: 1,
+        attractions: [
+          { name: "維多利亞瀑布", enName: "Victoria Falls", wiki: "Victoria_Falls", coords: [25.8572, -17.9243], tag: "世界遺產", season: "3月–5月（水量最大）；9月–12月（枯水期可探險魔鬼泳池）", desc: "當地人稱「雷鳴之煙」的世界三大瀑布之一，寬達1.7公里的尚比西河水幕墜入玄武岩裂谷，旱季更可於瀑布懸崖邊緣體驗魔鬼泳池。" }
+        ]
+      },
+
+      // -------------------- 大洋洲 OCEANIA (4) --------------------
+      {
+        id: "036", name: "澳洲", enName: "Australia", continent: "大洋洲",
+        coords: [133.77, -25.27], popularity: 94, tier: 5,
+        attractions: [
+          { name: "雪梨歌劇院", enName: "Sydney Opera House", wiki: "Sydney_Opera_House", coords: [151.2153, -33.8568], tag: "世界遺產", season: "9月–11月、3月–5月（5–6月Vivid Sydney燈光節最絢爛）", desc: "丹麥建築師烏松設計的20世紀建築史詩，潔白風帆貝殼屋頂停泊於雪梨港灣，與港灣大橋共築南半球最耀眼城市名片。" },
+          { name: "大堡礁", enName: "Great Barrier Reef", wiki: "Great_Barrier_Reef", coords: [147.6992, -18.2871], tag: "世界遺產", season: "6月–10月（旱季海水能見度極高、無水母季）", desc: "綿延2,300公里的地球最大珊瑚礁生態系統，搭水上飛機俯瞰心形礁與白天堂沙灘的漸層蔚藍，潛入海底與海龜共舞。" },
+          { name: "烏魯魯巨岩", enName: "Uluru", wiki: "Uluru", coords: [131.0369, -25.3444], tag: "世界遺產", season: "5月–9月（澳洲紅土中心涼季，夜間觀賞原野星光展）", desc: "澳洲內陸紅土沙漠心臟地帶的348公尺高神聖砂岩獨塊巨石，隨太陽角度變幻赭紅、紫羅蘭與炙熱火紅，蘊含數萬年原住民精神。" }
+        ]
+      },
+      {
+        id: "554", name: "紐西蘭", enName: "New Zealand", continent: "大洋洲",
+        coords: [174.88, -40.9], popularity: 90, tier: 4,
+        attractions: [
+          { name: "米爾福德峽灣", enName: "Milford Sound", wiki: "Milford_Sound", coords: [167.9256, -44.6716], tag: "世界遺產", season: "11月–次年4月（南半球春夏日照長，雨後百瀑齊飛最壯觀）", desc: "被吉卜林譽為「世界第八大奇蹟」的南島峽灣核心，教冠峰從幽深鏡面海灣直聳雲霄，巡航途中常見瓶鼻海豚與峽灣企鵝。" },
+          { name: "皇后鎮", enName: "Queenstown, New Zealand", wiki: "Queenstown,_New_Zealand", coords: [168.6626, -45.0312], tag: "極限冒險", season: "全年皆宜（6月–9月滑雪季；3月–4月金黃秋葉）", desc: "坐落於瓦卡蒂普湖與卓越山脈懷抱的世界冒險之都，從高空彈跳、跳傘到噴射快艇與TSS蒸汽船，四季皆充滿電影感景致。" },
+          { name: "哈比村", enName: "Hobbiton Movie Set", wiki: "Hobbiton_Movie_Set", coords: [175.683, -37.872], tag: "電影聖地", season: "10月–4月（北島牧場綠草如茵、百花綻放）", desc: "《魔戒》與《哈比人》三部曲中完整保留的夏爾袋底洞村莊，44座圓門精巧小屋依翠綠山坡而建，讓人走進中土世界。" }
+        ]
+      },
+      {
+        id: "242", name: "斐濟", enName: "Fiji", continent: "大洋洲",
+        coords: [178.06, -17.71], popularity: 64, tier: 1,
+        attractions: [
+          { name: "瑪瑪努卡群島", enName: "Mamanuca Islands", wiki: "Mamanuca_Islands", coords: [177.12, -17.65], tag: "海島度假", season: "5月–10月（南太平洋旱季，陽光和煦海水如水晶）", desc: "由20座火山礁島組成的南太平洋伊甸園，擁有玻璃海、水上酒吧與潔白沙洲，亦是電影《浩劫重生》取景海域。" }
+        ]
+      },
+      {
+        id: "598", name: "巴布亞紐幾內亞", enName: "Papua New Guinea", continent: "大洋洲",
+        coords: [143.95, -6.31], popularity: 56, tier: 1,
+        attractions: [
+          { name: "拉包爾火山口", enName: "Rabaul caldera", wiki: "Rabaul_caldera", coords: [152.17, -4.23], tag: "火山秘境", season: "5月–10月（乾季適合搭船探訪塔烏魯烏活火山）", desc: "新不列顛島東端壯觀的海灣火山口盆地，冒著硫磺白煙的塔烏魯烏火山與二戰沉船潛點構成原始震撼的探險秘境。" },
+          { name: "威廉山", enName: "Mount Wilhelm", wiki: "Mount_Wilhelm", coords: [145.029, -5.78], tag: "極限攀登", season: "5月–9月（高地旱季視野極佳，日出可見雙海洋）", desc: "大洋洲最高峰之一（海拔4,509公尺），攀登穿越熱帶雲霧林與高山冰蝕湖，登頂清晨可同時遠眺南北兩側太平洋海岸。" }
+        ]
+      },
+
+      // -------------------- 南極洲 ANTARCTICA (1) --------------------
+      {
+        id: "010", name: "南極洲", enName: "Antarctica", continent: "南極洲",
+        coords: [-62.8, -64.8], popularity: 62, tier: 1,
+        attractions: [
+          { name: "南極半島天堂灣", enName: "Paradise Harbour", wiki: "Paradise_Harbour", coords: [-62.8667, -64.85], tag: "極地探險", season: "11月–次年3月（南半球夏季破冰船與抗冰郵輪航季）", desc: "南極半島西岸名副其實的冰雪天堂，冰川崩裂入鏡面般的幽藍海灣，搭乘橡皮艇穿梭浮冰之間，近距離觀察座頭鯨與巴布亞企鵝。" },
+          { name: "奇幻島（欺騙島）", enName: "Deception Island", wiki: "Deception_Island", coords: [-60.65, -62.95], tag: "地熱極境", season: "12月–2月（夏季冰層退去可安全駛入火山口海灣）", desc: "南極罕見的環形活火山島，探險船穿過狹窄的「海神風箱」海峽駛入火山口內灣，冒煙黑色火山沙灘讓旅人體驗冰天雪地泡天然地熱溫泉的奇幻反差。" }
+        ]
+      }
+    ];
+
+    // Update totals dynamically
+    const TOTAL_COUNTRIES = TOURISM_DATA.length;
+    const TOTAL_ATTRACTIONS = TOURISM_DATA.reduce((sum, c) => sum + c.attractions.length, 0);
+
+    // Lookup map by ISO numeric id
+    const COUNTRY_BY_ID = new Map(TOURISM_DATA.map(c => [c.id, c]));
+
+    // Color scale for 5 popularity tiers
+    const TIER_COLORS = {
+      1: "#634b19",
+      2: "#967022",
+      3: "#c9982c",
+      4: "#eab338",
+      5: "#ffd86b"
+    };
+
+    const TIER_LABELS = {
+      1: "TIER 1 // 極境秘境",
+      2: "TIER 2 // 文化精選",
+      3: "TIER 3 // 國際名勝",
+      4: "TIER 4 // 頂級樞紐",
+      5: "TIER 5 // 旗艦聖地"
+    };
+
+    // Continent viewport presets [lon, lat, zoomScale]
+    const CONTINENT_VIEWS = {
+      "全部": { center: [12, 18], scale: 1 },
+      "亞洲": { center: [95, 27], scale: 2.25 },
+      "歐洲": { center: [12, 51], scale: 3.3 },
+      "北美洲": { center: [-96, 36], scale: 2.15 },
+      "南美洲": { center: [-64, -22], scale: 2.2 },
+      "非洲": { center: [18, 2], scale: 2.25 },
+      "大洋洲": { center: [148, -24], scale: 2.55 },
+      "南極洲": { center: [-55, -66], scale: 2.8 }
+    };
+
+    // =========================================================================
+    // 2. APPLICATION STATE & DOM REFERENCES
+    // =========================================================================
+    const state = {
+      activeContinent: "全部",
+      selectedCountryId: null,
+      focusedAttractionName: null,
+      showMarkers: true,
+      currentZoomK: 1,
+      photoCache: new Map(), // wikiSlug -> imageUrl | null
+      worldFeatures: []
+    };
+
+    const dom = {
+      svg: d3.select("#world-map"),
+      loading: document.getElementById("map-loading"),
+      tooltip: document.getElementById("hover-tooltip"),
+      ttCountry: document.getElementById("tt-country"),
+      ttEn: document.getElementById("tt-en"),
+      ttContinent: document.getElementById("tt-continent"),
+      ttCount: document.getElementById("tt-count"),
+      ttPop: document.getElementById("tt-pop"),
+      ttSpots: document.getElementById("tt-spots"),
+      drawer: document.getElementById("briefing-drawer"),
+      drawerKicker: document.getElementById("drawer-kicker"),
+      drawerZh: document.getElementById("drawer-country-zh"),
+      drawerEn: document.getElementById("drawer-country-en"),
+      drawerContinent: document.getElementById("drawer-continent"),
+      drawerCount: document.getElementById("drawer-count"),
+      drawerPop: document.getElementById("drawer-pop"),
+      drawerPopBar: document.getElementById("drawer-pop-bar"),
+      drawerAttractions: document.getElementById("drawer-attractions"),
+      drawerCloseBtn: document.getElementById("drawer-close-btn"),
+      drawerFocusBtn: document.getElementById("drawer-focus-btn"),
+      searchInput: document.getElementById("search-input"),
+      searchClear: document.getElementById("search-clear"),
+      searchDropdown: document.getElementById("search-dropdown"),
+      statCountries: document.getElementById("stat-countries"),
+      statContinent: document.getElementById("stat-continent"),
+      statCoords: document.getElementById("stat-coords"),
+      clockTime: document.getElementById("clock-time"),
+      photoModal: document.getElementById("photo-modal"),
+      modalImg: document.getElementById("modal-img"),
+      modalTitle: document.getElementById("modal-title"),
+      modalSub: document.getElementById("modal-sub"),
+      modalClose: document.getElementById("modal-close")
+    };
+
+    // Update top pill & telemetry initial counts
+    document.querySelector('[data-continent="全部"]').textContent = `全部 (${TOTAL_COUNTRIES})`;
+    dom.statCountries.textContent = `${TOTAL_COUNTRIES} 國 / ${TOTAL_ATTRACTIONS} 景點`;
+
+    // Live HUD clock
+    function updateClock() {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, "0");
+      dom.clockTime.textContent = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // =========================================================================
+    // 3. MAP PROJECTION, SVG LAYERS & ZOOM SYSTEM
+    // =========================================================================
+    let width = window.innerWidth;
+    let height = window.innerHeight - document.getElementById("top-hud").offsetHeight;
+
+    const projection = d3.geoNaturalEarth1();
+    const path = d3.geoPath(projection);
+
+    // Build SVG Defs
+    const defs = dom.svg.append("defs");
+
+    const oceanGrad = defs.append("radialGradient")
+      .attr("id", "oceanGrad")
+      .attr("cx", "50%")
+      .attr("cy", "46%")
+      .attr("r", "65%");
+    oceanGrad.append("stop").attr("offset", "0%").attr("stop-color", "#081c3a");
+    oceanGrad.append("stop").attr("offset", "70%").attr("stop-color", "#040f22");
+    oceanGrad.append("stop").attr("offset", "100%").attr("stop-color", "#020814");
+
+    const goldGlow = defs.append("filter").attr("id", "goldGlow").attr("x", "-40%").attr("y", "-40%").attr("width", "180%").attr("height", "180%");
+    goldGlow.append("feGaussianBlur").attr("stdDeviation", "2.2").attr("result", "blur");
+    const merge = goldGlow.append("feMerge");
+    merge.append("feMergeNode").attr("in", "blur");
+    merge.append("feMergeNode").attr("in", "SourceGraphic");
+
+    const mapViewport = dom.svg.append("g").attr("id", "map-viewport");
+    const oceanLayer = mapViewport.append("g").attr("class", "ocean-layer");
+    const countriesLayer = mapViewport.append("g").attr("class", "countries-layer");
+    const countryMarkersLayer = mapViewport.append("g").attr("class", "country-markers-layer");
+    const attractionMarkersLayer = mapViewport.append("g").attr("class", "attraction-markers-layer");
+    const reticleLayer = mapViewport.append("g").attr("class", "reticle-layer");
+
+    const zoom = d3.zoom()
+      .scaleExtent([1, 14])
+      .on("zoom", (event) => {
+        const { transform } = event;
+        state.currentZoomK = transform.k;
+        mapViewport.attr("transform", transform);
+        updateZoomDependentStyles(transform.k);
+      });
+
+    dom.svg.call(zoom);
+
+    function fitProjection() {
+      const stage = document.getElementById("map-stage");
+      width = stage.clientWidth || window.innerWidth;
+      height = stage.clientHeight || window.innerHeight - 60;
+      dom.svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+      const padding = Math.min(width, height) * 0.04;
+      projection.fitExtent(
+        [[padding, padding], [width - padding, height - padding]],
+        { type: "Sphere" }
+      );
+    }
+
+    fu
